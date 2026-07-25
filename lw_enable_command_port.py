@@ -1,0 +1,36 @@
+"""
+lw_enable_command_port.py
+
+Run this ONCE, inside LightWave Layout, to turn on Layout's built-in
+Command Port (an official, NewTek-supplied network interface for
+remotely driving Layout - see lwcommandport.html / globalcommandport.html
+in the LightWave 2019 Python SDK docs, and the bundled Python client at
+support/python/lwcommandport in your LightWave install).
+
+This is a "single-shot" Generic plug-in (see "Anatomy of a LightWave
+Python Plug-in" -> "Single-Shot Exceptions" in the SDK docs): no class,
+no ServerRecord needed. Load it via Utilities > Plugins > Add Plugin,
+then invoke it once from the Utilities/Python menu (or a hotkey). You
+only need to do this again if you restart Layout.
+
+Despite the SDK doc's phrasing ("TCP/IP port"), the underlying wire
+protocol used by the bundled Python client is UDP - that's confirmed by
+reading support/python/lwcommandport/__init__.py directly (it uses
+socket.SOCK_DGRAM). Nothing to do about that here; just keep it in mind
+if this doesn't connect and you go looking with a packet sniffer.
+"""
+
+try:
+    import lwsdk
+except ImportError:
+    import sys
+    print("This is a LightWave Python Generic plug-in. Please run it inside LightWave.")
+    sys.exit(1)
+
+# Must match PORT in server.py / lw_mcp_query.py
+PORT = 9735
+
+_ok = lwsdk.LWCommandPort().enable(PORT)
+
+_msg = "MCP Command Port %s on port %d" % (("enabled" if _ok else "FAILED to enable"), PORT)
+lwsdk.LWMessageFuncs().info(_msg)
