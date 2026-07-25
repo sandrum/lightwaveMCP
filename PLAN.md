@@ -1,84 +1,93 @@
 # Claude ↔ LightWave 2019 MCP connector — build plan
 
-## Architecture (current, v2)
+## Current status (tested live against a running Layout 2019.1.5)
 
-Pivoted away from a hand-rolled socket server inside a Master plug-in
-(`lw_socket_master.py`, superseded) to LightWave 2019's own built-in
-**Command Port**, after reading the actual SDK docs and source shipped
-with this LightWave install:
+**Writes: working, verified.** `lw.AddNull("TestFromMCP")`, sent from an
+external Python process over UDP to LightWave's Command Port, produced a
+real Null item in the live scene - confirmed visually via screenshot.
+`lw_run_command` in `server.py` generalizes this to any of the ~800 native
+commands in the bundled `lwcommandport` client.
 
-- `sdk/lwpython2019.1.5.zip` — full local Python SDK docs (the online
-  docs site and Chrome were both unreachable earlier in this session;
-  turns out the same docs ship with the product).
-- `bin/lwsdk/pris/layout/cs.py` — the internal convenience layer LightWave
-  itself uses to issue commands (confirms `lwsdk.command("AddNull %s" %
-  name)` etc.).
-- `support/python/lwcommandport/` — NewTek's own external Python client
-  for the Command Port, meant to be run outside LightWave. Copied into
-  this project folder.
+**Reads: not working yet.** Two approaches were tried and both ruled out
+by direct testing, not just reasoning from docs:
 
-Why this is better than the original plan: no guessing at an
-undocumented "tick" event, no custom threading/queueing inside the
-plug-in, no thread-safety risk. LightWave's own listener already handles
-main-thread synchronization.
+1. Registered Generic-class plug-in (`lw_mcp_query.py`), invoked by name
+   via `CommandInput LW_MCP_Query ping`. Result every time: `Unknown
+   command: "LW_MCP_Query"`. LightWave's command resolver only recognizes
+   native/compiled commands (like AddNull) - Python `IGeneric` plug-ins
+   aren't added to that namespace no matter what `ServerTagInfo` tags are
+   set (tried USERNAME alone, then USERNAME+BUTTONNAME+MENU).
+2. Master-class plug-in (`lw_mcp_master.py`) listening for
+   `LWEVNT_COMMAND`, per the exact pattern in the SDK doc's own
+   `master.html` example. Added debug logging of every event the plug-in
+   ever receives. Confirmed via the log:
+   - The plug-in only actually starts receiving events once activated in
+     the **Master Plugins** panel (Utilities → Master Plugins) - simply
+     loading it via Add Plugins is not enough, and this panel resets on
+     every Layout restart (needs re-adding each session).
+   - Its `event()` fires for ordinary UI actions (opening a dropdown,
+     selecting a menu item) with codes 290, 1, 309, 256.
+   - It does **not** fire at all for Command Port traffic - tested with
+     both an unresolved string (`MCP_QUERY:ping`) and a genuinely valid,
+     successful command (`AddNull`). Neither produced any event.
+   - There is no idle/tick event exposed to Python either (confirmed
+     earlier by grepping the entire local SDK doc set for
+     `LWMASTF_*`/`LWEVNT_*` constants - only 5 exist, none idle-related).
 
-Remaining asymmetry: the Command Port is one-way (UDP, fire-and-forget).
-Writes (create/modify) work directly through it. Reads need a small
-plug-in (`lw_mcp_query.py`) that LightWave runs on request and that
-writes its answer to a JSON file `server.py` polls.
+Also fixed two real bugs found via live tracebacks along the way:
+- `lwsdk.LWMessageFuncs().info(text)` actually requires two arguments
+  (`info(text, None)`), despite the SDK doc's own example showing one.
+- `lwsdk.IMaster.__init__` is called by the factory as `klass(context)`
+  (one arg), despite the SDK doc's own example showing
+  `__init__(self, context, count)`.
+Both suggest the local docs (and possibly the online ones, unreachable
+this session) are somewhat out of sync with this LightWave build - worth
+remembering if more of this surfaces.
 
-## Status by phase
+## What's left for reads (not attempted yet, in rough order of promise)
 
-1. **Access** — done. Computer-use access to Layout, Modeler, File
-   Explorer, Notepad. File access to the LightWave install folder and
-   the project folder.
-2. **Verify the real API** — done. Confirmed against local docs/source:
-   - `lwsdk.LWCommandPort().enable(port)` turns on the Command Port.
-   - `lwcommandport.layout.Layout(address=, port=)` is the official
-     external client; `.AddNull(name)` etc. are real, verified methods.
-   - `lwsdk.GenericAccess()` / `ga.commandArguments()` / single-shot
-     Generic plug-ins are the documented pattern for simple scripts.
-   - `lwsdk.LWSceneInfo()` / `lwsdk.LWItemInfo().first/next/name()` are
-     the real scene/item enumeration calls.
-   - Confirmed the embedded interpreter is Python 2.7 (not 3) - plug-in
-     code must be 2.7-compatible. `server.py` runs under the system
-     Python (3.6, already installed) instead, since it's an external
-     process.
-3. **Files rewritten** for the new architecture:
-   - `lw_enable_command_port.py` (single-shot, run once)
-   - `lw_mcp_query.py` (registered plug-in, answers reads)
-   - `lwcommandport/` (copied official client library)
-   - `server.py` (rewritten to use the Command Port)
-   All syntax-checked with `py_compile`. Not yet run inside a live Layout.
-
-## Next steps
-
-4. **Load and debug inside LightWave** (not started)
-   - Load `lw_enable_command_port.py`, run it once, confirm the
-     confirmation dialog appears.
-   - Load `lw_mcp_query.py`, confirm no error dialog on load.
-5. **Prove the round trip**
-   - `pip install "mcp[cli]"` if not already present.
-   - Run `server.py`'s tools directly (or via a quick standalone Python
-     snippet using `lwcommandport.layout.Layout` + a poll of
-     `_mcp_response.json`) to confirm `ping` → `"pong"`.
-6. **Wire up Claude Desktop**
-   - Add `server.py` to `claude_desktop_config.json`, restart Claude
-     Desktop (user's own action - restarting the app isn't something
-     this session can trigger), test `lw_ping` / `lw_get_scene_info` /
-     `lw_create_null` end-to-end from a Claude conversation.
-7. **Expand and verify**
-   - Add more commands (transforms, surfaces, delete) the same way:
-     writes via `lwcommandport.layout.Layout` methods directly, reads via
-     `lw_mcp_query.py` + response file.
-   - Final pass: a handful of real prompts end-to-end, confirm no
-     regressions, document remaining gaps.
+- **Scene-file export + external parse.** Native commands are the only
+  thing confirmed to work reliably. `SaveSceneAs <path>` is a native
+  command; if it actually writes a `.lws` file (started testing this,
+  didn't get a confirmed result before pausing), `server.py` could parse
+  that plain-text file directly for scene state instead of needing any
+  custom read plug-in at all. Worth finishing this check first - it sidesteps
+  the entire plug-in/event problem.
+- **LScript instead of Python** for the notification hook - LScript is
+  the older, more mature scripting path in LightWave and may have working
+  equivalents where the Python bindings are incomplete/undocumented.
+- **A compiled C/C++ plug-in** using the real SDK could register a true
+  named command (the class native commands like AddNull actually use)
+  that Python's exposed classes don't have access to. Confirmed via the
+  docs' own Handler Interfaces list: only Master, Generic, CommandSequence
+  (Modeler-only), and various I/O handler classes are exposed to Python -
+  no plain "Command" class.
 
 ## Files
 
-- `lw_enable_command_port.py` — run once inside Layout.
-- `lw_mcp_query.py` — registered plug-in, answers read queries.
-- `lwcommandport/` — NewTek's official Command Port client, copied in.
-- `server.py` — external MCP bridge server.
+- `lw_enable_command_port.py` — run once inside Layout to turn on the
+  Command Port. Working.
+- `server.py` — external MCP bridge server. `lw_run_command` and
+  `lw_create_null` work; `lw_ping`/`lw_get_scene_info` do not yet.
+- `lwcommandport/` — NewTek's official Command Port client, copied from
+  the LightWave install. Working, this is what makes writes work.
+- `lw_mcp_master.py` — Master-class plug-in with the LWEVNT_COMMAND
+  attempt for reads. Loads and runs without error, but its event handler
+  never fires for Command Port traffic (see above) - not currently useful
+  but left in place with debug logging for whoever picks this up next.
+- `lw_mcp_query.py` — Generic-class plug-in, the first (also unsuccessful)
+  attempt at reads. Kept for reference/history.
+- `lw_socket_master.py` — superseded very first draft (custom TCP socket
+  server, relied on a tick event that doesn't exist). Do not load.
 - `README.md` — setup/testing instructions.
-- `lw_socket_master.py` — superseded first draft; do not load.
+
+## Setup (for what currently works)
+
+1. In Layout: Utilities → Plugins → Add Plugins → `lw_enable_command_port.py`
+   (runs once automatically, enables Command Port on 9735 - title bar
+   should show `(CP: 9735)`).
+2. `pip install "mcp[cli]"`.
+3. Add `server.py` to Claude Desktop's MCP config, restart Claude Desktop.
+4. Ask Claude to call `lw_create_null` or `lw_run_command` - these work.
+   `lw_ping`/`lw_get_scene_info` will time out until the read path above
+   gets solved.

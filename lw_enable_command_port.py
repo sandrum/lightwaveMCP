@@ -33,4 +33,7 @@ PORT = 9735
 _ok = lwsdk.LWCommandPort().enable(PORT)
 
 _msg = "MCP Command Port %s on port %d" % (("enabled" if _ok else "FAILED to enable"), PORT)
-lwsdk.LWMessageFuncs().info(_msg)
+# LWMessageFuncs().info() mirrors the C API's msg->info(text, detail) - it
+# takes two string args (detail may be None), not just one, despite what
+# the SDK doc's abbreviated example shows.
+lwsdk.LWMessageFuncs().info(_msg, None)

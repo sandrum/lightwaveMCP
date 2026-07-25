@@ -97,6 +97,8 @@ class mcp_query(lwsdk.IGeneric):
 
 ServerTagInfo = [
     ("LW MCP Query", lwsdk.SRVTAG_USERNAME | lwsdk.LANGID_USENGLISH),
+    ("LW MCP Query", lwsdk.SRVTAG_BUTTONNAME | lwsdk.LANGID_USENGLISH),
+    ("Utilities/Python", lwsdk.SRVTAG_MENU | lwsdk.LANGID_USENGLISH),
 ]
 
 ServerRecord = {

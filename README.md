@@ -1,69 +1,46 @@
 # Claude ↔ LightWave 2019 MCP connector (proof of concept)
 
-Built on LightWave 2019's **official Command Port** (`lwsdk.LWCommandPort`),
-not a hand-rolled socket server. See `PLAN.md` for the full story, including
-why the first design (`lw_socket_master.py`, now superseded) got replaced.
+Built on LightWave 2019's official Command Port (`lwsdk.LWCommandPort`).
+**Writes are proven working end to end** (tested live - see `PLAN.md` for
+the full log). **Reads are not solved yet** - two approaches were tried
+and both ruled out by direct testing; `PLAN.md` documents exactly what was
+tried and what to try next.
 
-## Architecture
+## What works right now
 
-```
-Claude  <--stdio-->  server.py  <--UDP, Command Port-->  Layout
-                          |
-                          `--reads--> _mcp_response.json <--writes-- lw_mcp_query.py (plug-in, inside Layout)
-```
+Ask Claude (once set up - see below) to:
+- Create a Null item (`lw_create_null`) - sends `AddNull` over the
+  Command Port, confirmed to create a real item in the live scene.
+- Run any native Layout command (`lw_run_command`) - a generic passthrough
+  to the ~800 commands in `lwcommandport/layout/__init__.py` (the same
+  client library NewTek ships with LightWave). One-way, no confirmation
+  that LightWave accepted it, just that it was sent.
 
-- **Writes** (e.g. creating a Null) go straight through LightWave's own
-  built-in commands (`AddNull`, etc.) via the `lwcommandport` Python client
-  NewTek ships at `support/python/lwcommandport` in the LightWave install
-  (copied into this folder so `server.py` can just `import` it). One-way,
-  fire-and-forget, but official and safe - LightWave's own listener handles
-  main-thread execution internally.
-- **Reads** (e.g. scene info) need a way back out, and the Command Port is
-  one-way UDP with no response channel. So `lw_mcp_query.py` is a small
-  registered plug-in, loaded once inside Layout, that `server.py` invokes
-  by name over the Command Port (`CommandInput LW_MCP_Query get_scene_info`)
-  and that writes its answer to `_mcp_response.json`, which `server.py`
-  polls.
+## What doesn't work yet
 
-## Files
-
-- `lw_enable_command_port.py` — run **once** inside Layout to turn on the
-  Command Port (single-shot Generic plug-in, no persistent state).
-- `lw_mcp_query.py` — registered plug-in that answers read queries by
-  writing `_mcp_response.json`.
-- `lwcommandport/` — NewTek's own Python client for the Command Port,
-  copied from the LightWave install, used by `server.py`.
-- `server.py` — the MCP server Claude Desktop launches; bridges tool calls
-  to the above.
-- `lw_socket_master.py` — superseded first draft, kept for history only.
-  Do not load it as a plug-in.
-
-## Status
-
-Written and syntax-checked, not yet run inside a live Layout session.
-See `PLAN.md` for the remaining load/test steps.
+`lw_ping` and `lw_get_scene_info` - anything that needs data back *out*
+of LightWave. The Command Port is one-way (UDP, fire-and-forget); getting
+a response out requires LightWave to run code and write a file
+somewhere, and every mechanism tried for triggering that from the outside
+failed in testing. See `PLAN.md` for specifics and next ideas (the most
+promising untried one: parsing a scene file written via the native
+`SaveSceneAs` command, instead of any custom plug-in).
 
 ## Setup
 
 **1. Enable the Command Port (once per Layout session)**
 
-- Utilities → Plugins → Add Plugin → select `lw_enable_command_port.py`.
-- Run it once (it should pop up a confirmation message). It has no UI of
-  its own beyond that message - it's a "single-shot" plug-in.
+Utilities → Plugins → Add Plugins → select `lw_enable_command_port.py`.
+It runs automatically on load (it's a "single-shot" plug-in) - the title
+bar should change to show `(CP: 9735)`.
 
-**2. Load the query plug-in**
-
-- Utilities → Plugins → Add Plugin → select `lw_mcp_query.py`.
-- It should load silently (no confirmation dialog) since it's a
-  persistent registered plug-in, not single-shot.
-
-**3. Install the MCP server's dependency**
+**2. Install the MCP server's dependency**
 
 ```
 pip install "mcp[cli]" --break-system-packages
 ```
 
-**4. Point Claude Desktop at `server.py`**
+**3. Point Claude Desktop at `server.py`**
 
 In `claude_desktop_config.json`:
 
@@ -80,8 +57,16 @@ In `claude_desktop_config.json`:
 
 Restart Claude Desktop.
 
-**5. Test**
+**4. Test**
 
-With Layout running (Command Port enabled, query plug-in loaded), ask
-Claude to call `lw_ping`. If it returns `"pong"`, the whole round trip
-(MCP → Command Port → plug-in → response file → MCP) works end to end.
+With Layout running and the Command Port enabled, ask Claude to create a
+Null item. Check Layout - it should appear immediately.
+
+## Files
+
+- `lw_enable_command_port.py` — run once inside Layout. Working.
+- `server.py` — MCP server Claude Desktop launches. Writes work, reads don't yet.
+- `lwcommandport/` — NewTek's official Command Port client (copied from the LightWave install).
+- `lw_mcp_master.py`, `lw_mcp_query.py` — two different attempts at solving reads, both instructive dead ends, kept for reference.
+- `lw_socket_master.py` — superseded very first draft. Do not load.
+- `PLAN.md` — full build log: what's verified, what failed, what to try next.

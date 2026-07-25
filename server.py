@@ -2,24 +2,35 @@
 server.py
 
 MCP bridge between Claude and LightWave Layout, built on LightWave's
-official Command Port rather than a hand-rolled socket server.
+official Command Port.
 
-- Writes (create/modify scene state) go straight through LightWave's own
-  built-in commands (e.g. AddNull) via the bundled `lwcommandport` Python
-  client (copied here from support/python/lwcommandport in the LightWave
-  install - it's a plain-stdlib package, no LightWave runtime needed to
-  import it).
-- Reads go through a small registered plug-in (lw_mcp_query.py) that this
-  script invokes via the Command Port's CommandInput command, then reads
-  back from the JSON file that plug-in writes (_mcp_response.json, next
-  to these scripts) - the Command Port itself is one-way/UDP, so this
-  file is the only way to get data back out.
+VERIFIED STATUS (tested live against LightWave 2019.1.5, see PLAN.md for
+the full log of what was tried):
 
-Prerequisites (see PLAN.md):
-1. Layout running.
-2. lw_enable_command_port.py has been run once inside Layout (turns on
-   the Command Port on PORT below).
-3. lw_mcp_query.py is loaded as a plug-in inside Layout.
+- WRITES work end to end. lw.AddNull("TestFromMCP") sent from this
+  machine's Python over UDP to Layout's Command Port produced a real Null
+  item in the live scene, confirmed visually. Any of the ~800 native
+  Layout commands exposed by the bundled `lwcommandport` client (copied
+  here from support/python/lwcommandport in the LightWave install) should
+  work the same way via lw_run_command below.
+- READS do not work yet. The Command Port is one-way (UDP, fire and
+  forget) with no response channel, so getting data back out requires
+  LightWave itself to run some code and write a file. Two approaches were
+  tried and both were ruled out empirically, not just in theory:
+    1. A registered Generic-class plug-in invoked by name via
+       `CommandInput <PluginName>` - LightWave's command resolver only
+       recognizes native/compiled commands, not Python Generic plug-ins.
+       Every attempt produced "Unknown command: <name>".
+    2. A Master-class plug-in listening for LWEVNT_COMMAND (per the SDK
+       doc's own master.html example) - confirmed via a debug log that
+       this event never fires for ANY Command Port traffic, including
+       commands that succeed (AddNull) and commands that don't resolve.
+  lw_get_scene_info and lw_ping are left in below as documented stubs so
+  the shape of the fix is obvious, but they will time out / error until
+  a working read channel is found (candidates: LScript instead of Python
+  for the notification hook, a compiled C plug-in registering a real
+  named command, or parsing a scene file written via a native save
+  command).
 
 Requires: pip install "mcp[cli]"
 """
@@ -45,15 +56,48 @@ def _layout():
     return Layout(address=HOST, port=PORT)
 
 
-def _query(command, arg=""):
-    """Invoke lw_mcp_query.py inside Layout via CommandInput, then poll
-    the response file it writes for a fresh answer."""
+@mcp.tool()
+def lw_run_command(command: str, args: list = None) -> str:
+    """Send any native LightWave Layout command by name over the Command
+    Port (e.g. command="AddLight", args=["Distant"]). This is a direct,
+    one-way passthrough to LightWave's command language - the same
+    commands available via hotkeys/menus/LScript. Confirmed working with
+    AddNull; most of the ~800 commands in lwcommandport/layout/__init__.py
+    should behave the same way. There is no response - this only tells
+    you the command was sent, not whether LightWave accepted it."""
+    lw = _layout()
+    method = getattr(lw, command, None)
+    if method is None:
+        return json.dumps({"error": "no such command: %s" % command})
+    try:
+        method(*(args or []))
+        return json.dumps({"result": "sent %s %s" % (command, args or [])})
+    except Exception as exc:  # noqa: BLE001
+        return json.dumps({"error": str(exc)})
+
+
+@mcp.tool()
+def lw_create_null(name: str = "MCP_Null") -> str:
+    """Create a Null item in the current LightWave scene. Verified
+    working: this sends AddNull over the Command Port and LightWave
+    creates the item immediately."""
+    try:
+        _layout().AddNull(name)
+        return json.dumps({"result": "sent AddNull %s" % name})
+    except Exception as exc:  # noqa: BLE001
+        return json.dumps({"error": str(exc)})
+
+
+def _query(command, arg="", timeout=5.0):
+    """NOT CURRENTLY WORKING - see module docstring. Left in place as the
+    intended shape of the read path once a working notification mechanism
+    is found; will reliably time out for now."""
     before_mtime = os.path.getmtime(RESPONSE_PATH) if os.path.exists(RESPONSE_PATH) else None
 
     cmd_string = ("LW_MCP_Query %s %s" % (command, arg)).strip()
     _layout().CommandInput(cmd_string)
 
-    deadline = time.time() + 5.0
+    deadline = time.time() + timeout
     while time.time() < deadline:
         if os.path.exists(RESPONSE_PATH):
             mtime = os.path.getmtime(RESPONSE_PATH)
@@ -62,37 +106,25 @@ def _query(command, arg=""):
                     with open(RESPONSE_PATH) as f:
                         return json.load(f)
                 except (ValueError, OSError):
-                    pass  # file mid-write; retry
+                    pass
         time.sleep(0.1)
 
-    return {"error": "timed out waiting for LightWave's response file"}
+    return {"error": "timed out - read path is not working yet, see PLAN.md"}
 
 
 @mcp.tool()
 def lw_ping() -> str:
-    """Check that LightWave's Command Port + query plug-in are reachable.
-    Use this first, before trying anything else."""
+    """NOT WORKING YET - always times out. See module docstring / PLAN.md
+    for what's been ruled out and what to try next."""
     resp = _query("ping")
     return resp.get("result") or resp.get("error", "no response")
 
 
 @mcp.tool()
 def lw_get_scene_info() -> str:
-    """Get basic info about the current LightWave scene (name, filename,
-    and a list of object/light/camera item names)."""
+    """NOT WORKING YET - always times out. See module docstring / PLAN.md
+    for what's been ruled out and what to try next."""
     return json.dumps(_query("get_scene_info"))
-
-
-@mcp.tool()
-def lw_create_null(name: str = "MCP_Null") -> str:
-    """Create a Null item in the current LightWave scene. This goes
-    straight through LightWave's built-in AddNull command over the
-    Command Port - no custom plug-in involved."""
-    try:
-        _layout().AddNull(name)
-        return json.dumps({"result": "sent AddNull %s" % name})
-    except Exception as exc:  # noqa: BLE001
-        return json.dumps({"error": str(exc)})
 
 
 if __name__ == "__main__":
