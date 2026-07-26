@@ -1,0 +1,6 @@
+mcp_ring_master instantiated
+ringAttach called
+ring_event: raw='{0} ping'
+ring_event: raw='{0} ping'
+ring_event: raw='{MCP} ping'
+ring_event: raw='{MCP} get_scene_info'

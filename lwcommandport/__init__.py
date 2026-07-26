@@ -323,7 +323,12 @@ class CommandPort(object):
     def Ring(self, topic, command):
         """ Ring(prefix, command) """
         if sys.version_info[0] > 2:
-            command = "{{0}} {1}".format(topic, command)
+            # NOTE: NewTek's shipped code here was "{{0}} {1}".format(...),
+            # which produces the literal string "{0} ping" (the doubled
+            # braces escape to a literal brace, so {0} is never actually
+            # substituted) instead of "{MCP} ping". Confirmed live via
+            # _mcp_ring_debug.log showing raw='{0} ping'. Fixed here.
+            command = "{{{0}}} {1}".format(topic, command)
         else:
             command = "{%s} %s" % (topic, command)
         self._send_command(command, None)

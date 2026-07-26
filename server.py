@@ -13,24 +13,24 @@ the full log of what was tried):
   Layout commands exposed by the bundled `lwcommandport` client (copied
   here from support/python/lwcommandport in the LightWave install) should
   work the same way via lw_run_command below.
-- READS do not work yet. The Command Port is one-way (UDP, fire and
-  forget) with no response channel, so getting data back out requires
-  LightWave itself to run some code and write a file. Two approaches were
-  tried and both were ruled out empirically, not just in theory:
-    1. A registered Generic-class plug-in invoked by name via
-       `CommandInput <PluginName>` - LightWave's command resolver only
-       recognizes native/compiled commands, not Python Generic plug-ins.
-       Every attempt produced "Unknown command: <name>".
-    2. A Master-class plug-in listening for LWEVNT_COMMAND (per the SDK
-       doc's own master.html example) - confirmed via a debug log that
-       this event never fires for ANY Command Port traffic, including
-       commands that succeed (AddNull) and commands that don't resolve.
-  lw_get_scene_info and lw_ping are left in below as documented stubs so
-  the shape of the fix is obvious, but they will time out / error until
-  a working read channel is found (candidates: LScript instead of Python
-  for the notification hook, a compiled C plug-in registering a real
-  named command, or parsing a scene file written via a native save
-  command).
+
+- READS now work too, via LWComRing (not LWEVNT_COMMAND - that was a
+  confirmed dead end, see PLAN.md). The working mechanism, found in
+  NewTek's own bundled sample
+  (support/plugins/scripts/Python/Layout/Master/command_port_test.py):
+  a Master plug-in calls lwsdk.LWComRing().ringAttach(
+  lwsdk.LW_PORT_COMMAND_PORT, self, self.ring_event) and receives Command
+  Port traffic wrapped as "{Topic} message". The client-side Ring(topic,
+  command) method that formats that wrapper already existed in NewTek's
+  bundled lwcommandport client - but it has a real bug under Python 3:
+  `"{{0}} {1}".format(topic, command)` produces the literal string
+  "{0} message" instead of "{MCP} message" (doubled braces escape to a
+  literal brace instead of substituting). Confirmed live via
+  _mcp_ring_debug.log. Fixed in lwcommandport/__init__.py.
+
+  See lw_mcp_ring.py for the Master plug-in that must be loaded (Add
+  Plugins) AND activated (Master Plugins panel) once per Layout session,
+  alongside lw_enable_command_port.py.
 
 Requires: pip install "mcp[cli]"
 """
@@ -88,14 +88,19 @@ def lw_create_null(name: str = "MCP_Null") -> str:
         return json.dumps({"error": str(exc)})
 
 
+RING_TOPIC = "MCP"
+
+
 def _query(command, arg="", timeout=5.0):
-    """NOT CURRENTLY WORKING - see module docstring. Left in place as the
-    intended shape of the read path once a working notification mechanism
-    is found; will reliably time out for now."""
+    """Read path over LWComRing. Requires lw_mcp_ring.py to be loaded AND
+    activated (Utilities > Master Plugins) in the current Layout session -
+    see lw_mcp_ring.py's docstring for the two-step setup. Sends
+    "{MCP} <command> <arg>" via the (bug-fixed) Ring() method, then polls
+    _mcp_response.json for the plug-in's answer."""
     before_mtime = os.path.getmtime(RESPONSE_PATH) if os.path.exists(RESPONSE_PATH) else None
 
-    cmd_string = ("LW_MCP_Query %s %s" % (command, arg)).strip()
-    _layout().CommandInput(cmd_string)
+    cmd_string = ("%s %s" % (command, arg)).strip()
+    _layout().Ring(RING_TOPIC, cmd_string)
 
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -109,21 +114,23 @@ def _query(command, arg="", timeout=5.0):
                     pass
         time.sleep(0.1)
 
-    return {"error": "timed out - read path is not working yet, see PLAN.md"}
+    return {"error": "timed out - is lw_mcp_ring.py loaded AND activated in Master Plugins this session?"}
 
 
 @mcp.tool()
 def lw_ping() -> str:
-    """NOT WORKING YET - always times out. See module docstring / PLAN.md
-    for what's been ruled out and what to try next."""
+    """Round-trip check that the read path (LWComRing) is alive. Returns
+    "pong" if lw_mcp_ring.py is loaded and activated in the current Layout
+    session, otherwise a timeout error explaining the two-step setup."""
     resp = _query("ping")
     return resp.get("result") or resp.get("error", "no response")
 
 
 @mcp.tool()
 def lw_get_scene_info() -> str:
-    """NOT WORKING YET - always times out. See module docstring / PLAN.md
-    for what's been ruled out and what to try next."""
+    """Get the current scene name, filename, and item list (objects,
+    lights, cameras) from the live LightWave scene via the LWComRing read
+    path (see lw_mcp_ring.py)."""
     return json.dumps(_query("get_scene_info"))
 
 
