@@ -20,6 +20,17 @@ Ask Claude (once set up - see below) to:
   - real round trips, built on `LWComRing` (see `PLAN.md` for how this
   read path actually works and the real NewTek client-library bug that
   had to be fixed to make it work).
+- Get the current selection (`lw_get_selection`), a camera's settings
+  (`lw_get_camera_info`), or a light's settings (`lw_get_light_info`) -
+  all confirmed live. Note: animatable camera/light values (focal
+  length, color, intensity, etc.) are evaluated at scene start
+  (time=0.0), not LightWave's live playhead - see `PLAN.md`/`ROADMAP.md`
+  for why and what it would take to fix.
+- Run any native **Modeler** command (`modeler_run_command`) - same
+  pattern as `lw_run_command` but for Modeler, which uses a different
+  Command Port mechanism (see Setup step 3 below). Confirmed live:
+  `command="new"` created a real new object layer. Modeler *reads*
+  aren't solved yet - see `ROADMAP.md`.
 
 ## Setup
 
@@ -37,13 +48,28 @@ select "LW MCP Ring" (listed as "Claude MCP Command Port Ring listener")
 → make sure its "On" checkbox is ticked. Unlike step 1, this one needs
 both the Add Plugins step and this activation step.
 
-**3. Install the MCP server's dependency**
+**3. Enable Modeler's Command Port (once per Modeler session, optional -
+only needed for `modeler_run_command`)**
+
+Modeler uses a different mechanism than Layout - not
+`LWCommandPort().enable()`, but `ModCommand()` + executing a command
+called `ENABLECOMMANDPORT`. In Modeler: Utilities → Plugins → Add
+Plugins → select `lw_enable_modeler_command_port.py` (this only
+*registers* it - Modeler treats single-file plug-ins differently than
+Layout). Then Utilities → Additional → find and click
+`lw_enable_modeler_command_port` in the list to actually run it. Title
+bar should change to show `(CP: 9736)`. Note: the script may report
+"failure" internally (a real bug in this SDK build's `ModCommand.
+execute()` return code, not an actual failure) - trust the title bar,
+not any printed result.
+
+**4. Install the MCP server's dependency**
 
 ```
 pip install "mcp[cli]" --break-system-packages
 ```
 
-**4. Point Claude Desktop at `server.py`**
+**5. Point Claude Desktop at `server.py`**
 
 In `claude_desktop_config.json`:
 
@@ -60,7 +86,7 @@ In `claude_desktop_config.json`:
 
 Restart Claude Desktop.
 
-**5. Test**
+**6. Test**
 
 With Layout running and both plug-ins enabled, ask Claude to create a
 Null item, then ask it to ping LightWave or get scene info. Check Layout
@@ -75,10 +101,13 @@ wasn't.
 
 ## Files
 
-- `lw_enable_command_port.py` — run once inside Layout. Enables writes. Working.
-- `lw_mcp_ring.py` — Master plug-in enabling reads via `LWComRing`. Needs both Add Plugins and Master Plugins activation. Working.
-- `server.py` — MCP server Claude Desktop launches. Writes and reads both work.
+- `lw_enable_command_port.py` — run once inside Layout. Enables Layout writes. Working.
+- `lw_mcp_ring.py` — Master plug-in enabling Layout reads via `LWComRing`. Needs both Add Plugins and Master Plugins activation. Working.
+- `lw_enable_modeler_command_port.py` — run once inside Modeler (Add Plugins, then Utilities > Additional). Enables Modeler writes. Working.
+- `server.py` — MCP server Claude Desktop launches. Layout writes/reads and Modeler writes all work.
 - `lwcommandport/` — NewTek's official Command Port client (copied from the LightWave install), with one real bug fixed in `Ring()` (see `PLAN.md`).
-- `lw_mcp_master.py`, `lw_mcp_query.py` — two earlier, unsuccessful attempts at solving reads, kept for reference/history. Do not load.
+- `lw_mcp_master.py`, `lw_mcp_query.py` — two earlier, unsuccessful attempts at solving Layout reads, kept for reference/history. Do not load.
 - `lw_socket_master.py` — superseded very first draft. Do not load.
+- `lw_mcp_diag.py`, `lw_mcp_diag2.py`, `lw_mcp_diag3.py`, `lw_diag_modeler_cp.py` — throwaway live-introspection probe plug-ins, not needed going forward.
 - `PLAN.md` — full build log: what's verified, what failed, what to try next.
+- `ROADMAP.md` — prioritized list of what to build next.

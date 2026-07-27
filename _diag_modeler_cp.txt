@@ -1,0 +1,7 @@
+bind 9736: FAILED (error(10048, 'Only one usage of each socket address (protocol/network address/port) is normally permitted')) - something IS using this port already
+ModCommand valid=True
+lookup(ENABLECOMMANDPORT)=16392
+execute port=10101 -> result=0 dyna_value=<lwsdk.pcore.DynaValue; proxy of <Swig Object of type 'DynaValue *' at 0x000000000EA4B990> >
+execute port=9736 -> result=0 dyna_value=<lwsdk.pcore.DynaValue; proxy of <Swig Object of type 'DynaValue *' at 0x000000000EA4B900> >
+post-retry bind 10101: SUCCEEDED (still free)
+post-retry bind 9736: FAILED (error(10048, 'Only one usage of each socket address (protocol/network address/port) is normally permitted')) - now in use

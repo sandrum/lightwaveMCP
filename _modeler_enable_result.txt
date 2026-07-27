@@ -1,0 +1,5 @@
+stage 0: script started
+stage 1: lwsdk imported ok
+stage 2: ModCommand() created, valid=True
+stage 3: lookup(ENABLECOMMANDPORT) = 16392
+stage 4: execute result=0 (1=success, 0=failure), port=9736

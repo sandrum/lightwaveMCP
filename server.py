@@ -42,9 +42,11 @@ import time
 from mcp.server.fastmcp import FastMCP
 
 from lwcommandport.layout import Layout
+from lwcommandport.modeler import Modeler
 
 HOST = "localhost"
 PORT = 9735  # must match lw_enable_command_port.py
+MODELER_PORT = 9736  # must match lw_enable_modeler_command_port.py
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 RESPONSE_PATH = os.path.join(_HERE, "_mcp_response.json")
@@ -54,6 +56,10 @@ mcp = FastMCP("lightwave")
 
 def _layout():
     return Layout(address=HOST, port=PORT)
+
+
+def _modeler():
+    return Modeler(address=HOST, port=MODELER_PORT)
 
 
 @mcp.tool()
@@ -67,6 +73,29 @@ def lw_run_command(command: str, args: list = None) -> str:
     you the command was sent, not whether LightWave accepted it."""
     lw = _layout()
     method = getattr(lw, command, None)
+    if method is None:
+        return json.dumps({"error": "no such command: %s" % command})
+    try:
+        method(*(args or []))
+        return json.dumps({"result": "sent %s %s" % (command, args or [])})
+    except Exception as exc:  # noqa: BLE001
+        return json.dumps({"error": str(exc)})
+
+
+@mcp.tool()
+def modeler_run_command(command: str, args: list = None) -> str:
+    """Send any native LightWave Modeler command by name over Modeler's
+    Command Port (a different mechanism than Layout's - see
+    lw_enable_modeler_command_port.py). E.g. command="new" for New
+    Object, command="boolean" for Boolean CSG, command="load",
+    args=["path/to/file.lwo"] to load an object. See the Modeler class
+    in lwcommandport/modeler/__init__.py for the full wrapped command
+    list (mesh cleanup, extrude/clone/array tools, file ops). One-way,
+    no confirmation LightWave accepted it - requires
+    lw_enable_modeler_command_port.py to have been run in the current
+    Modeler session first."""
+    m = _modeler()
+    method = getattr(m, command, None)
     if method is None:
         return json.dumps({"error": "no such command: %s" % command})
     try:
@@ -132,6 +161,52 @@ def lw_get_scene_info() -> str:
     lights, cameras) from the live LightWave scene via the LWComRing read
     path (see lw_mcp_ring.py)."""
     return json.dumps(_query("get_scene_info"))
+
+
+@mcp.tool()
+def lw_get_selection() -> str:
+    """Get every item's name/type and whether it's currently selected in
+    Layout, plus a convenience list of just the selected names. Confirmed
+    live against LWItemInfo().selected() - note that flags() &
+    LWITEMF_SELECTED does NOT reliably reflect selection state despite
+    the name (tested, returned the same value for every item)."""
+    return json.dumps(_query("get_selection"))
+
+
+@mcp.tool()
+def lw_get_camera_info(name: str = "Camera") -> str:
+    """Get a camera's resolution, focal length, f-stop, field of view,
+    and zoom factor. Note: animatable values (focal length, f-stop, fov,
+    zoom) are evaluated at time=0.0, not the live playhead position -
+    querying the actual current time isn't solved yet (see ROADMAP.md).
+    Fine for cameras that aren't animated."""
+    return json.dumps(_query("get_camera_info", name))
+
+
+@mcp.tool()
+def lw_get_light_info(name: str = "Light") -> str:
+    """Get a light's type, falloff, color (RGB), intensity, and range.
+    Same time=0.0 caveat as lw_get_camera_info for the animatable
+    values."""
+    return json.dumps(_query("get_light_info", name))
+
+
+@mcp.tool()
+def lw_probe_channels(name: str = "TransformTest") -> str:
+    """DIAGNOSTIC, temporary: probes lwsdk.LWChannelInfo() group/channel
+    traversal against the named item, routed through the proven
+    lw_mcp_ring.py listener (the dedicated diag4/5/6 Master plugins never
+    received ring_event callbacks at all - root-caused to a stale/GC'd
+    instance, see PLAN.md). Will be replaced by lw_get_transform once the
+    real API shape is known."""
+    return json.dumps(_query("probe_channels", name))
+
+
+@mcp.tool()
+def lw_probe_surf() -> str:
+    """DIAGNOSTIC, temporary: lists SURF_* constants from lwsdk, routed
+    through lw_mcp_ring.py. Will be replaced by lw_get_surface_info."""
+    return json.dumps(_query("probe_surf"))
 
 
 if __name__ == "__main__":

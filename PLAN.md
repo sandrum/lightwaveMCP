@@ -1,5 +1,43 @@
 # Claude ↔ LightWave 2019 MCP connector — build plan
 
+## Modeler write path (ROADMAP.md item 2)
+
+Confirmed live end to end. Modeler uses a completely different
+enable mechanism than Layout - not `lwsdk.LWCommandPort().enable()`, but
+`lwsdk.ModCommand()` + looking up and executing a native command called
+`"ENABLECOMMANDPORT"` (see `lw_enable_modeler_command_port.py`, adapted
+from NewTek's own bundled sample). Two real findings from getting this
+working:
+
+- **Modeler treats single-file plug-ins differently than Layout.**
+  Loading via Add Plugins only *registers* it as a "Modeling Command" -
+  unlike Layout's Generic single-shot scripts, it does not run
+  automatically. It has to be separately invoked afterward via
+  Utilities > Additional > (the script's name, alphabetical in a long
+  list).
+- **`ModCommand.execute()`'s reported result code is unreliable.**
+  Enabling the port returned `result=0` ("failure" per NewTek's own
+  sample comment) both when the port was genuinely free and when it was
+  already successfully bound and listening. Confirmed via a UDP
+  bind-conflict test (the same ground-truth trick used earlier to debug
+  Layout's Command Port) that the enable actually succeeded regardless
+  of what the return code said - the title bar showing `(CP: 9736)` is
+  the reliable signal, not the result code. This is a third confirmed
+  bug/inconsistency in this SDK build's Python bindings, alongside
+  `LWMessageFuncs.info()`'s arg count and `IMaster.__init__`'s arg count.
+
+`modeler_run_command` in `server.py` mirrors `lw_run_command`, using the
+previously-unused `Modeler` class in `lwcommandport/modeler/__init__.py`
+(mesh cleanup, extrude/clone/array tools, booleans, file ops). Confirmed
+live via the real MCP tool: sent `command="new"`, Modeler's title bar
+changed from "Unnamed" to "Unnamed 1", confirming a real new object
+layer was created.
+
+**Not yet done: Modeler reads.** Modeler's plugin architecture
+(`CommandSequence`) is different from Layout's Master-plugin model that
+`LWComRing` uses for reads - see ROADMAP.md item 5 for what's still
+open.
+
 ## Current status (tested live against a running Layout 2019.1.5)
 
 **Writes: working, verified, twice over.** `lw.AddNull(...)` sent over UDP
@@ -87,6 +125,38 @@ MCP tools after this restart: `lw_ping` returned `"pong"`, and
 earlier in this same session via `lw_create_null`. Full read+write round
 trip is proven working, not just theorized.
 
+## Read path, round 2: selection, camera, light (ROADMAP.md item 1)
+
+Added `lw_get_selection`, `lw_get_camera_info`, `lw_get_light_info` -
+all confirmed live via the real MCP tools after a server restart. Found
+the exact method signatures by writing three small throwaway probe
+plug-ins (`lw_mcp_diag.py`, `diag2`, `diag3` - safe to ignore/leave
+unloaded, kept only as a record of what was tried) that dumped live
+`dir(lwsdk)` results and tested real method calls against the actual
+scene, rather than guessing from static docs:
+
+- `LWItemInfo().selected(item)` → 0/1, the reliable selection signal.
+  Important: `flags() & LWITEMF_SELECTED` looked plausible from the name
+  but is **not** reliable - tested live, returned the same flags value
+  (37) for every item regardless of actual selection state.
+- `LWCameraInfo`/`LWLightInfo` split into two calling conventions:
+  non-animated properties take just the item ID (`resolution(id)`,
+  `falloff(id)`, `type(id)`), while animatable ones need a second `time`
+  argument (`focalLength(id, time)`, `color(id, time)`, etc.) - confirmed
+  working with `time=0.0`.
+- `LWLightInfo().color()` returns a `PCore::Vector` SWIG object, not
+  JSON-serializable directly - converted via `.x`/`.y`/`.z`.
+
+**Open limitation:** `time=0.0` means these evaluate at scene start, not
+LightWave's live playhead position. There's no confirmed way yet to
+query the actual current time from Python - fine for non-animated
+cameras/lights, wrong for animated ones. See ROADMAP.md.
+
+**Descoped, promoted to their own roadmap items:** item transform
+(position/rotation/scale - needs `LWChannelInfo` group/channel
+traversal with an unclear iteration-end sentinel) and surface/material
+info (needs `SURF_*` constants not yet found via introspection).
+
 ## Files
 
 - `lw_enable_command_port.py` — run once inside Layout to turn on the
@@ -95,8 +165,19 @@ trip is proven working, not just theorized.
   Must be both loaded (Add Plugins) and activated (Master Plugins panel)
   each fresh Layout session.
 - `server.py` — external MCP bridge server. `lw_run_command`,
-  `lw_create_null`, `lw_ping`, and `lw_get_scene_info` all work now
-  (reads require `lw_mcp_ring.py` to be active - see above).
+  `lw_create_null`, `lw_ping`, `lw_get_scene_info`, `lw_get_selection`,
+  `lw_get_camera_info`, `lw_get_light_info`, and `modeler_run_command`
+  all work now (reads require `lw_mcp_ring.py` to be active - see
+  above; `modeler_run_command` requires
+  `lw_enable_modeler_command_port.py` to have been run in Modeler).
+- `lw_enable_modeler_command_port.py` — run once inside Modeler (via Add
+  Plugins, then Utilities > Additional - see above for why it's two
+  steps) to turn on Modeler's Command Port on 9736. Working, confirmed
+  live.
+- `lw_mcp_diag.py`, `lw_mcp_diag2.py`, `lw_mcp_diag3.py`,
+  `lw_diag_modeler_cp.py` — throwaway live-introspection probe plug-ins
+  used to find the real method signatures/behavior documented above. Not
+  needed going forward; safe to ignore or unload.
 - `lwcommandport/` — NewTek's official Command Port client, copied from
   the LightWave install, with one bug fixed (`Ring()`'s Python 3 topic
   formatting - see above). This is what makes both writes and reads work.

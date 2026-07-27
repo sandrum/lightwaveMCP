@@ -1,0 +1,1 @@
+{"result": {"light": {"color": "<lwsdk.pcore.Vector; proxy of <Swig Object of type 'PCore::Vector *' at 0x000000000E5A0C90> >", "intensity": "3.140000104904175", "range": "0.0"}, "camera": {"focalLength": "23.99999982118606", "fovAngles": "(1.0141970024587093, 0.605769728265296)", "fStop": "4.0", "zoomFactor": "3.200000047683716"}}}
