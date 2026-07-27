@@ -63,3 +63,14 @@ ring_event: raw='{MCP} ping'
 ring_event: raw='{MCP} get_scene_info'
 mcp_ring_master_v4 instantiated
 ringDetach called
+mcp_ring_master_v4 instantiated
+ringAttach called
+ring_event: raw='{MCP} ping'
+ring_event: raw='{MCP} probe_channels TransformTest'
+ring_event: raw='{MCP} probe_channels TransformTest'
+ringDetach called
+mcp_ring_master_v4 instantiated
+ringAttach called
+ring_event: raw='{MCP} probe_channels TransformTest'
+ringDetach called
+mcp_ring_master_v4 instantiated

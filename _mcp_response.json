@@ -1,1 +1,1 @@
-{"result": {"scene_name": "(unnamed)", "items": ["CleanTest1", "CleanTest2", "TransformTest (1)", "TransformTest (2)", "Light", "Camera"], "filename": "(unnamed)"}}
+{"result": {"group_iterations": 0, "nextGroup(None) FAILED": "LWChannelInfo_nextGroup() takes exactly 3 arguments (2 given)", "target_id": "<Swig Object of type 'NodeID' at 0x000000000E095C30>", "groups": []}}

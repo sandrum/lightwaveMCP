@@ -179,10 +179,10 @@ def _probe_channels(name):
     ci = lwsdk.LWChannelInfo()
 
     try:
-        g = ci.nextGroup(None)
-        out["nextGroup(None)_first_call"] = repr(g)
+        g = ci.nextGroup(target, None)
+        out["nextGroup(target, None)_first_call"] = repr(g)
     except Exception as exc:  # noqa: BLE001
-        out["nextGroup(None) FAILED"] = str(exc)
+        out["nextGroup(target, None) FAILED"] = str(exc)
         g = None
 
     count = 0
@@ -229,7 +229,7 @@ def _probe_channels(name):
 
         count += 1
         try:
-            g = ci.nextGroup(g)
+            g = ci.nextGroup(target, g)
         except Exception as exc:  # noqa: BLE001
             out["nextGroup(advance) FAILED"] = str(exc)
             break
@@ -304,7 +304,7 @@ def _handle_query(text):
 
     try:
         if command == "ping":
-            payload = {"result": "pong-V2-MARKER"}
+            payload = {"result": "pong"}
         elif command == "get_scene_info":
             payload = {"result": _get_scene_info()}
         elif command == "introspect":
