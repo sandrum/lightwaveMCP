@@ -50,6 +50,7 @@ MODELER_PORT = 9736  # must match lw_enable_modeler_command_port.py
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 RESPONSE_PATH = os.path.join(_HERE, "_mcp_response.json")
+MODELER_RESPONSE_PATH = os.path.join(_HERE, "_mcp_modeler_response.json")
 
 mcp = FastMCP("lightwave")
 
@@ -105,6 +106,66 @@ def modeler_run_command(command: str, args: list = None) -> str:
         return json.dumps({"error": str(exc)})
 
 
+MODELER_QUERY_COMMAND = "LW_MCP_ModelerQuery"
+
+
+def _modeler_query(command, arg="", timeout=5.0):
+    """DOES NOT WORK OVER THE NETWORK - kept for the record and in case a
+    future in-process invocation path is found. ROADMAP.md item 5:
+    confirmed live (three ways, including against NewTek's own bundled
+    sample plug-in, not just this project's code) that Modeler's network
+    Command Port only reaches native/compiled commands, not
+    Python-registered CommandSequence commands like
+    lw_mcp_modeler_query.py's LW_MCP_ModelerQuery - unlike Layout, there
+    is no LWComRing-style escape hatch for Modeler. This function will
+    reliably time out. See PLAN.md "Modeler read path" for the full
+    investigation. The plug-in itself works correctly when invoked from
+    inside Modeler (e.g. Utilities > Additional menu) - it's specifically
+    the external network call that never reaches it."""
+    before_mtime = os.path.getmtime(MODELER_RESPONSE_PATH) if os.path.exists(MODELER_RESPONSE_PATH) else None
+
+    cmd_string = ("%s %s %s" % (MODELER_QUERY_COMMAND, command, arg)).strip()
+    m = _modeler()
+    m._send_command(cmd_string)
+
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if os.path.exists(MODELER_RESPONSE_PATH):
+            mtime = os.path.getmtime(MODELER_RESPONSE_PATH)
+            if before_mtime is None or mtime > before_mtime:
+                try:
+                    with open(MODELER_RESPONSE_PATH) as f:
+                        return json.load(f)
+                except (ValueError, OSError):
+                    pass
+        time.sleep(0.1)
+
+    return {"error": "timed out - is lw_mcp_modeler_query.py loaded (Add Plugins) in Modeler this session?"}
+
+
+@mcp.tool()
+def modeler_ping() -> str:
+    """WILL ALWAYS TIME OUT - confirmed dead end, see PLAN.md "Modeler
+    read path". Modeler's network Command Port doesn't route to
+    Python-registered plug-in commands (unlike native ones like "new"),
+    and Modeler has no LWComRing-style listener mechanism the way Layout
+    does. Kept only for the record / in case a future workaround is
+    found - don't spend time retrying this."""
+    resp = _modeler_query("ping")
+    return resp.get("result") or resp.get("error", "no response")
+
+
+@mcp.tool()
+def modeler_get_object_info() -> str:
+    """WILL ALWAYS TIME OUT - see modeler_ping's docstring and PLAN.md
+    "Modeler read path". Kept for the record only.
+
+    (Intended behavior, unreachable over the network: point count,
+    polygon count, and surface names for the foreground layer of the
+    object currently open in Modeler, via lw_mcp_modeler_query.py.)"""
+    return json.dumps(_modeler_query("get_object_info"))
+
+
 @mcp.tool()
 def lw_create_null(name: str = "MCP_Null") -> str:
     """Create a Null item in the current LightWave scene. Verified
@@ -113,6 +174,39 @@ def lw_create_null(name: str = "MCP_Null") -> str:
     try:
         _layout().AddNull(name)
         return json.dumps({"result": "sent AddNull %s" % name})
+    except Exception as exc:  # noqa: BLE001
+        return json.dumps({"error": str(exc)})
+
+
+@mcp.tool()
+def lw_set_keyframe(name: str, frame: int, position: list = None, rotation: list = None, scale: list = None) -> str:
+    """Create a keyframe for an item at a given frame, optionally setting
+    its position/rotation/scale first. Wraps the common by-hand animation
+    sequence (ROADMAP.md item 4) - select the item, go to the frame, set
+    the transform, create the key - into one call instead of chaining
+    4+ separate lw_run_command calls. Any of position/rotation/scale left
+    as None (the default) is not touched - the item keeps whatever value
+    it currently has at this frame, so you can create a key on just one
+    channel type if that's all you want. position and scale are each
+    [x, y, z] triples; rotation is [heading, pitch, bank] in degrees,
+    matching Layout's UI and command-line convention (confirmed live:
+    values entered here appear in the Motion Options panel unchanged -
+    note this is a different unit than the read-path's lw_get_transform,
+    which reports rotation in radians per the LWItemInfo SDK global).
+    Uses the native SelectItem/GoToFrame/Position/Rotation/Scale/CreateKey
+    commands - all proven-reachable via lw_run_command already."""
+    lw = _layout()
+    try:
+        lw.SelectItem(name)
+        lw.GoToFrame(frame)
+        if position is not None:
+            lw.Position(*position)
+        if rotation is not None:
+            lw.Rotation(*rotation)
+        if scale is not None:
+            lw.Scale(*scale)
+        lw.CreateKey(frame)
+        return json.dumps({"result": "keyframed %s at frame %d" % (name, frame)})
     except Exception as exc:  # noqa: BLE001
         return json.dumps({"error": str(exc)})
 
@@ -192,6 +286,27 @@ def lw_get_light_info(name: str = "Light") -> str:
 
 
 @mcp.tool()
+def lw_get_transform(name: str = "TransformTest") -> str:
+    """Get an item's position, rotation, and scale from the live scene.
+    Uses LWItemInfo().param() - confirmed via NewTek's C SDK docs and
+    real-world Python plugin code, NOT the LWChannelInfo/nextGroup path
+    that crashed Layout during development (see PLAN.md). Same time=0.0
+    caveat as lw_get_camera_info/lw_get_light_info for animated items."""
+    return json.dumps(_query("get_transform", name))
+
+
+@mcp.tool()
+def lw_get_surface_info(name: str) -> str:
+    """Get a surface/material's color, diffuse, luminosity, specularity,
+    glossiness, reflection, transparency, and smoothing by surface name.
+    Uses LWSurfaceFuncs(), confirmed via real-world Python plugin code
+    for calling conventions - less thoroughly live-tested than other
+    tools here (see PLAN.md), so treat unexpected errors as a signal to
+    check the debug log rather than retry blindly."""
+    return json.dumps(_query("get_surface_info", name))
+
+
+@mcp.tool()
 def lw_probe_channels(name: str = "TransformTest") -> str:
     """DIAGNOSTIC, temporary: probes lwsdk.LWChannelInfo() group/channel
     traversal against the named item, routed through the proven
@@ -207,6 +322,84 @@ def lw_probe_surf() -> str:
     """DIAGNOSTIC, temporary: lists SURF_* constants from lwsdk, routed
     through lw_mcp_ring.py. Will be replaced by lw_get_surface_info."""
     return json.dumps(_query("probe_surf"))
+
+
+@mcp.tool()
+def lw_set_camera_resolution(width: int, height: int) -> str:
+    """Set the render resolution (ROADMAP.md item 6 camera setup half).
+    Wraps the native FrameSize(width, height) command - this is a
+    scene-wide render global in LightWave, not a per-camera setting
+    (LightWave only renders through one camera at a time, selected via
+    SelectItem), despite the name suggesting otherwise."""
+    try:
+        _layout().FrameSize(width, height)
+        return json.dumps({"result": "sent FrameSize %d %d" % (width, height)})
+    except Exception as exc:  # noqa: BLE001
+        return json.dumps({"error": str(exc)})
+
+
+@mcp.tool()
+def lw_render_frame(frame: int = None) -> str:
+    """Render a single frame (ROADMAP.md item 6). If frame is given,
+    goes to that frame first (GoToFrame), then sends RenderFrame - both
+    proven-reachable native commands. This call returns immediately once
+    the command is sent, same one-way-fire-and-forget limitation as
+    every other command here (see lwcommandport/__init__.py's
+    _send_command) - it does NOT wait for the render to finish. Poll
+    lw_get_render_status() afterward to know when it's actually done;
+    see that tool's docstring for the required one-time setup."""
+    lw = _layout()
+    try:
+        if frame is not None:
+            lw.GoToFrame(frame)
+        lw.RenderFrame()
+        return json.dumps({"result": "sent RenderFrame%s" % (" (frame %d)" % frame if frame is not None else "")})
+    except Exception as exc:  # noqa: BLE001
+        return json.dumps({"error": str(exc)})
+
+
+@mcp.tool()
+def lw_render_scene() -> str:
+    """Render the full configured frame range to disk/animation output
+    (native RenderScene command). Same fire-and-forget caveat as
+    lw_render_frame - use lw_get_render_status() to track progress and
+    completion."""
+    try:
+        _layout().RenderScene()
+        return json.dumps({"result": "sent RenderScene"})
+    except Exception as exc:  # noqa: BLE001
+        return json.dumps({"error": str(exc)})
+
+
+@mcp.tool()
+def lw_abort_render() -> str:
+    """Abort an in-progress render (native AbortRender command)."""
+    try:
+        _layout().AbortRender()
+        return json.dumps({"result": "sent AbortRender"})
+    except Exception as exc:  # noqa: BLE001
+        return json.dumps({"error": str(exc)})
+
+
+@mcp.tool()
+def lw_get_render_status() -> str:
+    """Get the live render state - whether a render is in progress, the
+    resolution, and a frame_count that increments each time the render
+    engine opens a new frame buffer (see lw_mcp_render_monitor.py).
+    Solves the actual problem in ROADMAP.md item 6: lw_render_frame/
+    lw_render_scene are one-way fire-and-forget commands with no
+    built-in completion signal, so this reads real callback-driven state
+    (IFrameBuffer.open()/close()) over the LWComRing read path instead
+    of guessing based on elapsed time.
+
+    Requires a ONE-TIME manual setup step beyond the usual Add Plugins +
+    Master Plugins dance: lw_mcp_render_monitor.py must additionally be
+    selected as the active Render Display (Render Globals > Render
+    Display tab) - LightWave has no networked way to select it, per
+    lw_mcp_render_monitor.py's docstring. Before that's done, or before
+    any render has been triggered this session, rendering will be null,
+    not a real in-progress/done state."""
+    return json.dumps(_query("get_render_status"))
 
 
 if __name__ == "__main__":

@@ -40,28 +40,28 @@ the same time-query problem; surface needs `SURF_*` constants that
 weren't found in the introspection pass. Promoted to their own roadmap
 items below rather than guessed at.
 
-## 1b. Item transform query (position/rotation/scale)
+## 1b. Item transform query (position/rotation/scale) - DONE
 
-Needs `lwsdk.LWChannelInfo()`, which exposes `nextGroup`/`groupName`/
-`nextChannel`/`channelName`/`channelParent`/`channelEvaluate` - channels
-are grouped (one group per item, matched via `channelParent(chan) ==
-item_id`) rather than queried directly by item. Two things need live
-probing before implementing: what sentinel value `nextGroup`/
-`nextChannel` return at the end of iteration (None? 0? a NULL id?), and
-resolving the same current-time question as above for
-`channelEvaluate(chan, time)`. Same probe-plugin technique as roadmap
-item 1 should resolve this quickly.
+Turned out not to need `lwsdk.LWChannelInfo()`/`nextGroup` at all - that
+path is confirmed to crash Layout (see `PLAN.md`), but tracking down
+NewTek's real SDK docs (etwright.org/lwsdk, since none ship with this
+install) found that `LWItemInfo` already has a direct `param(item,
+param_type, time)` call for exactly this. Real-world third-party Python
+plugin code confirmed the Python calling convention. Shipped as
+`lw_get_transform`, confirmed live against a real item including after
+moving it (not just reading defaults) - see `PLAN.md`.
 
-## 1c. Surface/material info query
+## 1c. Surface/material info query - DONE
 
-Needs `lwsdk.LWSurfaceFuncs()` (`byName`, `getFlt`, `getInt`,
-`getColorVMap`, etc.) plus the `SURF_*` channel constants (e.g. color,
-luminosity, reflection) that identify which property `getFlt`/`getInt`
-are reading - not yet found via introspection (they likely don't match
-a "Surface" substring search the way class names do). Needs a
-targeted `dir(lwsdk)` grep for `SURF_` specifically, then live
-`byName()`/`getFlt()` probing the same way camera/light info was
-confirmed.
+Shipped as `lw_get_surface_info`, using `lwsdk.LWSurfaceFuncs()`
+(`byName`, `getFlt`) plus the `SURF_*` channel constants. Calling
+conventions confirmed via the same real-world Python plugin code used
+for 1b. Confirmed live end to end against a real object with a real
+surface (built a unit box in Modeler, loaded it into Layout, queried
+its "Default" surface) - see `PLAN.md` for the full values returned.
+One minor open question: the `smoothing` value's sign/scale under the
+newer Principled BSDF shading model isn't fully decoded yet, but the
+mechanism itself is proven safe.
 
 ## 2. Modeler write path - DONE
 
@@ -88,61 +88,78 @@ Two things that didn't go as expected, both documented in `PLAN.md`:
   project, after `LWMessageFuncs.info()` and `IMaster.__init__`'s
   argument counts.
 
-## 3. Animation helpers built on what already works
+## 4. Animation helpers built on what already works - DONE
 
-`Position`/`Rotation`/`Scale`, `AddPosition`/`AddRotation`,
-`CreateKey`/`DeleteKey`, `GoToFrame`, `AutoKey` are all proven-reachable
-native commands (we already had to fight `AutoKey` once, so it's a known
-quantity). Rather than making Claude chain raw `lw_run_command` calls,
-wrap the common pattern - move to a position/rotation, create a key,
-advance the frame - into one or two higher-level MCP tools.
+Shipped `lw_set_keyframe(name, frame, position, rotation, scale)`,
+wrapping `SelectItem`/`GoToFrame`/`Position`/`Rotation`/`Scale`/
+`CreateKey` into one call. Confirmed live on a fresh Null: keyed frame 0
+at (0,0,0) and frame 30 at (5,5,5), then scrubbed to frame 15 and saw an
+interpolated (3.104, 3.104, 3.104) - real proof the item animates between
+keys, not just that two writes succeeded. See `PLAN.md` for the full
+writeup, including a documented rotation-units mismatch (degrees on
+write vs. radians on read).
 
-Effort: small, mostly API design. Value: medium - a real quality-of-life
-step once basic scene building and Modeler are solid, so I'd sequence it
-after both.
+## 5. Modeler read path - RESEARCHED, confirmed blocked (no known workaround)
 
-## 5. Modeler read path (open research question, now unblocked)
+Investigated thoroughly and live-tested; see `PLAN.md` for the full
+writeup. Summary: Modeler has no Master-plugin/`LWComRing` equivalent at
+all (confirmed via the local install's file layout and NewTek's SDK
+docs - Modeler's Python plugin architecture is `CommandSequence`-only).
+The natural workaround - invoke a custom `CommandSequence` plug-in by
+name over the network Command Port, the same way built-in commands like
+"new" already work via `modeler_run_command` - does not work. Confirmed
+three independent ways, including against NewTek's own bundled sample
+plug-in (not just this project's code), that the network Command Port
+only reaches native/compiled commands, not Python-registered ones. This
+is the same failure mode that ruled out Layout's first read-path attempt,
+except Modeler has no `LWComRing`-style escape hatch.
 
-Unlike Layout, I haven't found NewTek's equivalent of the `LWComRing`
-sample for getting data back out of *Modeler* - its plugin architecture
-is `CommandSequence`-based rather than the Master-plugin model Layout
-uses, so the same trick may not directly apply. This needs the same kind
-of live-tested investigation that solved Layout's read path (which took
-two ruled-out dead ends before finding the real mechanism). Now that the
-Modeler write path (item 2) is done, this is the natural next research
-item - worth checking whether `LWComRing`/`LW_PORT_COMMAND_PORT` is
-actually Layout-specific or works from Modeler's Master-equivalent too,
-before assuming a from-scratch mechanism is needed.
+**Status: blocked with no known path forward**, short of NewTek adding a
+Modeler equivalent of `LWComRing`/Master plugins, or documentation
+surfacing a mechanism this investigation didn't find. A real but limited
+substitute exists: reading saved `.lwo` files directly from disk (bypasses
+Modeler's Python API, only reflects saved state).
 
-Effort: unknown until investigated - could be quick if there's a
-similarly-documented sample, could be another multi-attempt dead-end
-hunt like Layout's was. Value: high now that modeling automation exists.
+Effort already spent: thorough (SDK docs research + live testing with
+three independent methods). Not recommending further time here without
+new information (e.g. a NewTek support answer or a newer LightWave
+version's SDK).
 
-## 6. Render / camera automation with completion signaling
+## 6. Render / camera automation with completion signaling - DONE
 
-Camera setup and render-kickoff commands exist natively. The missing
-piece is a way for Claude to know a render finished (or failed) rather
-than firing a one-way command and guessing - which means extending the
-read path (step 1's mechanism) with a render-status query, possibly
-polling, once that plumbing is proven out further.
-
-Effort: medium-high (needs the read path extended and a polling/status
-convention). Value: high but more speculative - lowest priority until
-1 and 2 are solid.
+Shipped `lw_render_frame`, `lw_render_scene`, `lw_abort_render`,
+`lw_set_camera_resolution`, and `lw_get_render_status`. The last one is
+the real deliverable here: a genuine completion signal instead of
+guessing after firing a one-way render command, built on
+`lwsdk.IFrameBuffer` (NewTek's "Render Display" plug-in architecture -
+found via NewTek's official docs, not live probing), which gets real
+open()/close() callbacks from the render engine itself. Requires a
+one-time manual step to select the plug-in as the active Render Display
+(no networked way to do this - confirmed via the local command list).
+Live-verified twice: once by hand via lw_run_command before the tools
+were loaded, once fully through the new tools (set resolution to
+640x360, triggered a render, watched rendering go true -> false with
+matching resolution/frame_count). See PLAN.md for the full writeup.
+Not yet tested: multi-frame RenderScene progress tracking.
 
 ## Recommended order
 
 1. ~~Layout read queries (selection, camera/light)~~ - done
 2. ~~Modeler write path~~ - done
-3. Item transform query (1b) and surface/material query (1c) - the two
-   read queries descoped from step 1, now their own well-scoped items
-4. Animation helper tools
-5. Modeler read path research - now unblocked
-6. Render/camera automation
+3. ~~Item transform query (1b) and surface/material query (1c)~~ - done
+4. ~~Animation helper tools~~ - done
+5. ~~Modeler read path research~~ - researched, confirmed blocked
+6. ~~Render/camera automation~~ - done
 
 Rationale: started with the cheapest, lowest-risk extensions of what's
 already proven (1, done), then opened the next major surface using a
-pattern already validated once (2, done). Next up: close out the
-remaining read queries now that the probing technique is proven (3),
-then build convenience on top of a now-broader foundation (4), before
-taking on the two genuinely open-ended research items (5, 6).
+pattern already validated once (2, done). Item 3 turned out to need a
+real docs lookup rather than more live probing - once that was done
+(see PLAN.md), both sub-items shipped quickly and safely. Item 5 was
+investigated thoroughly and turned out to be a genuine dead end, not
+just an unexplored option - documented rather than left open. Item 4
+built convenience on top of proven native commands and was the fastest
+item yet, confirming the project's core mechanisms are now solid. Item
+6 needed one more real docs lookup (the Frame Buffer/Render Display
+plug-in architecture) rather than guessing at a polling scheme, closing
+out every item originally on this list.

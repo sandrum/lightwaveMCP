@@ -50,6 +50,7 @@ __lwver__ = "11"
 _HERE = os.path.dirname(os.path.abspath(__file__))
 RESPONSE_PATH = os.path.join(_HERE, "_mcp_response.json")
 DEBUG_LOG_PATH = os.path.join(_HERE, "_mcp_ring_debug.log")
+RENDER_STATUS_PATH = os.path.join(_HERE, "_mcp_render_status.json")
 
 TOPIC = "MCP"
 _TOPIC_RE = re.compile(r"^\{(.+)\}\s*(.*)$")
@@ -163,80 +164,108 @@ def _get_light_info(name):
     }
 
 
-def _probe_channels(name):
-    """Diagnostic for ROADMAP item 1b (item transform query). Ported
-    verbatim from lw_mcp_diag4.py's _probe_channels, which was never
-    confirmed live because diag4/5/6's ring_event never fired at all -
-    routing it through this proven-working listener instead of chasing
-    that mystery further."""
-    out = {"groups": []}
+def _get_transform(name):
+    """Item position/rotation/scale. FOUND THE REAL API - does NOT use
+    LWChannelInfo/nextGroup (confirmed crashing, see _probe_channels
+    below). NewTek's C SDK docs (etwright.org/lwsdk/docs/globals/
+    iteminfo.html) show LWItemInfo already has a direct `param(item,
+    param_type, time, vector)` call for exactly this - position/rotation/
+    scale are LWIP_POSITION/LWIP_ROTATION/LWIP_SCALING. Real-world Python
+    plugin code (a bone-rigging tool, found via web search) confirmed the
+    Python binding is the 3-arg form `item_info.param(item_id, type,
+    time)` returning the vector directly (no separate out-parameter,
+    matching the pattern already proven for LWCameraInfo/LWLightInfo in
+    this file). Same time=0.0 caveat as camera/light info."""
     target = _find_item(name)
-    out["target_id"] = repr(target)
     if target is None:
-        out["error"] = "item not found: %s" % name
-        return out
+        return {"error": "item not found: %s" % name}
+    ii = lwsdk.LWItemInfo()
+    return {
+        "name": name,
+        "position": _vec_to_list(ii.param(target, lwsdk.LWIP_POSITION, 0.0)),
+        "rotation": _vec_to_list(ii.param(target, lwsdk.LWIP_ROTATION, 0.0)),
+        "scale": _vec_to_list(ii.param(target, lwsdk.LWIP_SCALING, 0.0)),
+        "note": "animatable values evaluated at time=0.0, not the live playhead",
+    }
 
-    ci = lwsdk.LWChannelInfo()
 
+def _get_surface_info(name):
+    """Surface/material info via LWSurfaceFuncs(). Real-world Python
+    plugin code (OD_CopyPasteExternal on GitHub, found via web search)
+    confirmed live calling conventions: byName(surfname, objname) and
+    byObject(objname) return plain Python-iterable lists of surface IDs
+    (not the NULL-terminated C array the SDK doc describes - SWIG handles
+    that), and getFlt(surf, channel) returns a plain float directly
+    (compared with `> 0` in the reference code), not the C pointer the
+    doc describes. objname=None should match every object per the C doc.
+    Untested against a real textured object as of this writing (the live
+    scene only had a Null and default Light/Camera) - test with a real
+    object before trusting this fully; wrap in the same try/except
+    _handle_query already has so a bad channel name degrades to an error
+    response rather than an unhandled exception."""
+    surf_ids = lwsdk.LWSurfaceFuncs().byName(name, None)
+    if not surf_ids:
+        return {"error": "surface not found: %s" % name}
+    surf = surf_ids[0]
+    sf = lwsdk.LWSurfaceFuncs()
+    return {
+        "name": sf.name(surf),
+        "color_rgb": _vec_to_list(sf.getFlt(surf, lwsdk.SURF_COLR)),
+        "diffuse": sf.getFlt(surf, lwsdk.SURF_DIFF),
+        "luminosity": sf.getFlt(surf, lwsdk.SURF_LUMI),
+        "specularity": sf.getFlt(surf, lwsdk.SURF_SPEC),
+        "glossiness": sf.getFlt(surf, lwsdk.SURF_GLOS),
+        "reflection": sf.getFlt(surf, lwsdk.SURF_REFL),
+        "transparency": sf.getFlt(surf, lwsdk.SURF_TRAN),
+        "smoothing": sf.getFlt(surf, lwsdk.SURF_SMAN),
+    }
+
+
+def _probe_channels(name):
+    """DISABLED as of this edit: lwsdk.LWChannelInfo().nextGroup(target,
+    None) - called with an item ID (from LWItemInfo) as the first
+    argument, satisfying the "takes exactly 3 arguments" signature error
+    seen with nextGroup(None) alone - reproducibly took down the entire
+    Layout process (no Python exception, no crash-report-worthy Python
+    traceback, just silence in the debug log after "about to call" and
+    then total unresponsiveness / an actual LightWave crash-reporter
+    dialog on next Quit). Confirmed twice. There is no LWChannelInfo C
+    header shipped with this install to check the real expected argument
+    types, and guessing further risks more crashes/restarts. Leaving
+    this stubbed out - ROADMAP item 1b (item transform query) is
+    blocked on this until NewTek's actual SDK docs/header for
+    LWChannelInfo can be consulted (see PLAN.md for the full writeup)."""
+    target = _find_item(name)
+    if target is None:
+        return {"error": "item not found: %s" % name}
+    return {
+        "target_id": repr(target),
+        "error": "probe disabled - nextGroup(item, prev) crashed Layout twice, "
+                 "see PLAN.md 'LWChannelInfo crash' section",
+    }
+
+
+def _get_render_status():
+    """Reads the status file written by lw_mcp_render_monitor.py's
+    IFrameBuffer.open()/close() callbacks (ROADMAP.md item 6). Separate
+    plug-in/file from this one because Frame Buffer is a different
+    LightWave plug-in architecture (Render Display server) than Master
+    (LWComRing) - this query just surfaces its output over the read
+    path already proven here, rather than requiring a second polling
+    mechanism on the client side."""
+    if not os.path.exists(RENDER_STATUS_PATH):
+        return {
+            "rendering": None,
+            "note": "no render has been triggered yet this session, or "
+                    "lw_mcp_render_monitor.py isn't set as the active Render "
+                    "Display (Render Globals > Render Display tab) - see "
+                    "lw_mcp_render_monitor.py's docstring",
+        }
     try:
-        g = ci.nextGroup(target, None)
-        out["nextGroup(target, None)_first_call"] = repr(g)
-    except Exception as exc:  # noqa: BLE001
-        out["nextGroup(target, None) FAILED"] = str(exc)
-        g = None
-
-    count = 0
-    seen_groups = []
-    while g is not None and count < 10:
-        entry = {"group_repr": repr(g)}
-        try:
-            entry["groupName"] = ci.groupName(g)
-        except Exception as exc:  # noqa: BLE001
-            entry["groupName FAILED"] = str(exc)
-
-        chan_count = 0
-        chans = []
-        try:
-            c = ci.nextChannel(g, None)
-        except Exception as exc:  # noqa: BLE001
-            c = None
-            entry["nextChannel FAILED"] = str(exc)
-        while c is not None and chan_count < 15:
-            chan_entry = {"chan_repr": repr(c)}
-            try:
-                chan_entry["channelName"] = ci.channelName(c)
-            except Exception as exc:  # noqa: BLE001
-                chan_entry["channelName FAILED"] = str(exc)
-            try:
-                parent = ci.channelParent(c)
-                chan_entry["channelParent"] = repr(parent)
-                chan_entry["matches_target"] = (parent == target)
-            except Exception as exc:  # noqa: BLE001
-                chan_entry["channelParent FAILED"] = str(exc)
-            try:
-                chan_entry["channelEvaluate(0.0)"] = ci.channelEvaluate(c, 0.0)
-            except Exception as exc:  # noqa: BLE001
-                chan_entry["channelEvaluate FAILED"] = str(exc)
-            chans.append(chan_entry)
-            chan_count += 1
-            try:
-                c = ci.nextChannel(g, c)
-            except Exception as exc:  # noqa: BLE001
-                chan_entry["nextChannel(advance) FAILED"] = str(exc)
-                break
-        entry["channels"] = chans
-        seen_groups.append(entry)
-
-        count += 1
-        try:
-            g = ci.nextGroup(target, g)
-        except Exception as exc:  # noqa: BLE001
-            out["nextGroup(advance) FAILED"] = str(exc)
-            break
-
-    out["groups"] = seen_groups
-    out["group_iterations"] = count
-    return out
+        with open(RENDER_STATUS_PATH) as f:
+            return json.load(f)
+    except (ValueError, OSError) as exc:
+        return {"error": str(exc)}
 
 
 def _probe_surf_constants():
@@ -315,10 +344,16 @@ def _handle_query(text):
             payload = {"result": _get_camera_info(arg or "Camera")}
         elif command == "get_light_info":
             payload = {"result": _get_light_info(arg or "Light")}
+        elif command == "get_transform":
+            payload = {"result": _get_transform(arg or "TransformTest")}
+        elif command == "get_surface_info":
+            payload = {"result": _get_surface_info(arg)}
         elif command == "probe_channels":
             payload = {"result": _probe_channels(arg or "TransformTest")}
         elif command == "probe_surf":
             payload = {"result": _probe_surf_constants()}
+        elif command == "get_render_status":
+            payload = {"result": _get_render_status()}
         else:
             payload = {"error": "unknown command: %s" % command}
     except Exception as exc:  # noqa: BLE001

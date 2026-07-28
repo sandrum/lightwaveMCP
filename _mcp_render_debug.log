@@ -1,0 +1,10 @@
+mcp_render_monitor instantiated, context=(<Swig Object of type 'NodeID' at 0x000000000DD5B720>, 0)
+open: width=1280 height=720 frame_count=1
+pause: display_name='Alpha'
+pause: display_name=None
+close: frame_count=1
+mcp_render_monitor instantiated, context=(None, 0)
+open: width=640 height=360 frame_count=1
+pause: display_name='Alpha'
+pause: display_name=None
+close: frame_count=1
