@@ -142,3 +142,13 @@ ring_event: raw='{MCP} ping'
 ring_event: raw='{MCP} get_render_status'
 ring_event: raw='{MCP} get_render_status'
 ring_event: raw='{MCP} get_render_status'
+ringDetach called
+mcp_ring_master_v4 instantiated
+ringAttach called
+ring_event: raw='{MCP} ping'
+ring_event: raw='{MCP} get_scene_info'
+ring_event: raw='{MCP} get_hierarchy'
+ring_event: raw='{MCP} get_hierarchy'
+ring_event: raw='{MCP} get_hierarchy'
+ring_event: raw='{MCP} get_scene_info'
+ring_event: raw='{MCP} get_scene_info'

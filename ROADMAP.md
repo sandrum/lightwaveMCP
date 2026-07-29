@@ -142,6 +142,22 @@ were loaded, once fully through the new tools (set resolution to
 matching resolution/frame_count). See PLAN.md for the full writeup.
 Not yet tested: multi-frame RenderScene progress tracking.
 
+## 7. Item hierarchy query (parent/target/goal/pole) - DONE
+
+Added ahead of the original list, prompted by a real use case: rigging
+on top of an object that's already parented to something else requires
+knowing the existing hierarchy first. Shipped `lw_get_hierarchy`, using
+`LWItemInfo.parent()`/`target()`/`goal()`/`pole()` (found via NewTek's
+official docs, same pattern as items 1b/1c/6). Live-verified against a
+real parent/child relationship, not just an empty scene - see PLAN.md.
+One real finding along the way: `ParentItem` via `lw_run_command` did
+NOT actually reparent items as tested (name-as-argument didn't take);
+the relationship had to be set through the UI to test the read side.
+That's a real, unsolved gap for anyone wanting to *write* parenting
+through this connector, not just read it. Bone-chain traversal
+(bones within an object) is explicitly out of scope for now - no boned
+object existed yet to verify traversal safely against.
+
 ## Recommended order
 
 1. ~~Layout read queries (selection, camera/light)~~ - done
@@ -150,6 +166,7 @@ Not yet tested: multi-frame RenderScene progress tracking.
 4. ~~Animation helper tools~~ - done
 5. ~~Modeler read path research~~ - researched, confirmed blocked
 6. ~~Render/camera automation~~ - done
+7. ~~Item hierarchy query~~ - done
 
 Rationale: started with the cheapest, lowest-risk extensions of what's
 already proven (1, done), then opened the next major surface using a
@@ -161,5 +178,7 @@ just an unexplored option - documented rather than left open. Item 4
 built convenience on top of proven native commands and was the fastest
 item yet, confirming the project's core mechanisms are now solid. Item
 6 needed one more real docs lookup (the Frame Buffer/Render Display
-plug-in architecture) rather than guessing at a polling scheme, closing
-out every item originally on this list.
+plug-in architecture) rather than guessing at a polling scheme. Item 7
+was added mid-stream from a real user need rather than pre-planned, and
+surfaced a genuine new gap (parenting via `lw_run_command` doesn't work)
+worth tracking separately if rigging needs a write path later.

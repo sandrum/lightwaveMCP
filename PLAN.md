@@ -1,5 +1,45 @@
 # Claude ↔ LightWave 2019 MCP connector — build plan
 
+## Item hierarchy query (ROADMAP.md item 7) — DONE
+
+User asked for a way to understand an object's existing parent/child
+(and rigging-relevant IK target/goal/pole) relationships before rigging
+on top of it. Found the real API the same way as items 1b/1c/6 - fetched
+NewTek's official Python SDK docs live rather than guessing
+(`static.lightwave3d.com/sdk/2015/python/globaliteminfo.html` - the
+`docs.lightwave3d.com` 2025 docs didn't have this specific page indexed,
+but the 2015 static docs cover the same `LWItemInfo` class already
+proven safe in this project). Confirmed real methods: `parent(item)`,
+`target(item)`, `goal(item)`, `pole(item)`, each returning an item ID or
+`LWITEM_NULL`.
+
+Shipped `lw_get_hierarchy` (via a new `get_hierarchy` query in
+`lw_mcp_ring.py`). Each relationship ID is resolved to a name via a
+second `LWItemInfo.name()` call so the response matches every other
+query's convention of reporting names, not raw IDs.
+
+**Live-verified with a real relationship, not just an empty scene:**
+queried a flat scene (`Light`, `Camera`, no parents) and got `parent:
+null` for both, as expected. Then created `ParentTest`/`ChildTest`
+nulls and tried to reparent via `lw_run_command("ParentItem",
+["ParentTest"])` after `SelectItem("ChildTest")` - **this did NOT
+work**: re-querying showed `ChildTest.parent` still `null`, and the
+Motion Options panel confirmed `Parent Item: (none)`. Root cause not
+yet investigated (worth a follow-up if this connector needs to *write*
+parenting, not just read it - possibly needs an item ID rather than a
+name, or a different command entirely). Set the parent for real via the
+Motion Options panel's "Parent Item" dropdown instead, then re-queried:
+`lw_get_hierarchy` correctly returned `{"name": "ChildTest", "parent":
+"ParentTest", ...}`. The read side is proven correct against ground
+truth; the write side for parenting specifically is not yet solved.
+
+**Deliberately out of scope this round:** bone chain traversal
+(`LWItemInfo.first(LWI_BONE, object)` / `next()`) - the live scene had
+no boned object to safely verify traversal against, and this project has
+a real precedent (`LWChannelInfo`/`nextGroup`) for an SDK traversal call
+crashing Layout, so it wasn't shipped un-tested. Follow-up once there's
+a real rigged object to test against.
+
 ## Render / camera automation (ROADMAP.md item 6) — DONE
 
 The real problem here was never "how do I trigger a render" - RenderFrame/

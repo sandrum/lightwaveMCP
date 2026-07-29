@@ -402,5 +402,23 @@ def lw_get_render_status() -> str:
     return json.dumps(_query("get_render_status"))
 
 
+@mcp.tool()
+def lw_get_hierarchy() -> str:
+    """Get parent/child and IK (target/goal/pole) relationships for every
+    object, light, and camera in the scene - e.g. before rigging on top
+    of an object that's already parented to something else. Each item
+    reports its own name/type plus the name of its parent (None if it
+    has none), and its IK target/goal/pole items if any are set. Uses
+    LWItemInfo.parent()/target()/goal()/pole(), confirmed via NewTek's
+    official SDK docs - the same LWItemInfo class already proven safe
+    elsewhere in this connector (lw_get_transform), not the LWChannelInfo
+    path that crashed Layout during development (see PLAN.md).
+
+    Does NOT currently walk bone chains within an object (only top-level
+    item parenting) - that's a follow-up once there's a real boned
+    object to verify traversal against safely; see PLAN.md."""
+    return json.dumps(_query("get_hierarchy"))
+
+
 if __name__ == "__main__":
     mcp.run()

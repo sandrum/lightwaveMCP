@@ -245,6 +245,62 @@ def _probe_channels(name):
     }
 
 
+def _resolve_name(ii, item_id):
+    """None for LWITEM_NULL (no relationship set), otherwise the item's
+    name. Isolated so a bad/unexpected ID degrades to None instead of
+    raising and killing the whole hierarchy query."""
+    try:
+        if item_id is None or item_id == lwsdk.LWITEM_NULL:
+            return None
+        return ii.name(item_id)
+    except Exception:
+        return None
+
+
+def _get_hierarchy():
+    """Parent/child and IK (target/goal/pole) relationships for every
+    object/light/camera. Uses LWItemInfo.parent()/target()/goal()/
+    pole() - confirmed via NewTek's official Python SDK docs (fetched
+    live from static.lightwave3d.com/sdk/2015/python/globaliteminfo.html,
+    since none ship with this install; this is the same LWItemInfo class
+    already proven safe here for _get_transform's param() calls, NOT the
+    LWChannelInfo path that crashed Layout - see PLAN.md). parent()
+    returns an item ID or LWITEM_NULL, so each relationship is resolved
+    to a name via a second LWItemInfo call rather than returned as a raw
+    ID, matching how every other query in this file reports items.
+
+    Deliberately NOT walking bone chains yet (LWItemInfo.first(LWI_BONE,
+    object) / next() would be needed) - the current live scene has no
+    boned object to test against, and given this project's real history
+    of an unbounded-traversal crash in a different SDK area
+    (LWChannelInfo/nextGroup, see PLAN.md), that's being left for a
+    follow-up increment with a real bone hierarchy to verify against
+    rather than shipped un-tested. Item-level parenting (nulls, objects,
+    lights, cameras) is fully covered here."""
+    ii = lwsdk.LWItemInfo()
+    items = []
+    for label, item_type in (
+        ("OBJECT", lwsdk.LWI_OBJECT),
+        ("LIGHT", lwsdk.LWI_LIGHT),
+        ("CAMERA", lwsdk.LWI_CAMERA),
+    ):
+        it = ii.first(item_type, lwsdk.LWITEM_NULL)
+        while it != lwsdk.LWITEM_NULL:
+            entry = {
+                "name": ii.name(it),
+                "type": label,
+                "parent": _resolve_name(ii, ii.parent(it)),
+            }
+            for key, getter in (("target", ii.target), ("goal", ii.goal), ("pole", ii.pole)):
+                try:
+                    entry[key] = _resolve_name(ii, getter(it))
+                except Exception:
+                    pass
+            items.append(entry)
+            it = ii.next(it)
+    return {"items": items}
+
+
 def _get_render_status():
     """Reads the status file written by lw_mcp_render_monitor.py's
     IFrameBuffer.open()/close() callbacks (ROADMAP.md item 6). Separate
@@ -354,6 +410,8 @@ def _handle_query(text):
             payload = {"result": _probe_surf_constants()}
         elif command == "get_render_status":
             payload = {"result": _get_render_status()}
+        elif command == "get_hierarchy":
+            payload = {"result": _get_hierarchy()}
         else:
             payload = {"error": "unknown command: %s" % command}
     except Exception as exc:  # noqa: BLE001
