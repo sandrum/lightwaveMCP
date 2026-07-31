@@ -152,3 +152,4 @@ ring_event: raw='{MCP} get_hierarchy'
 ring_event: raw='{MCP} get_hierarchy'
 ring_event: raw='{MCP} get_scene_info'
 ring_event: raw='{MCP} get_scene_info'
+ringDetach called
