@@ -403,6 +403,50 @@ def lw_get_render_status() -> str:
 
 
 @mcp.tool()
+def lw_get_item_id(name: str) -> str:
+    """Get the plain numeric ID string (e.g. "10000000") LightWave's
+    native item-reference commands (ParentItem, TargetItem, GoalItem,
+    PoleItem) actually expect as their argument over the Command Port -
+    NOT the item's name, despite their docstrings saying "(itemid)" the
+    same way SelectItem's does. Root-caused by comparing Cmd History's
+    log of a real, working UI-driven reparent (logged as literally
+    "ParentItem 10000000") against this connector's failed attempts with
+    a name string (logged as "TargetItem 0" - silently coerced to a
+    no-op ID, no error, no dialog). SelectItem is the one exception that
+    really does resolve names internally. See lw_set_parent for the
+    wrapped fix; use this directly only if you need the raw ID for a
+    command lw_set_parent doesn't cover yet (TargetItem/GoalItem/
+    PoleItem)."""
+    return json.dumps(_query("get_item_id", name))
+
+
+@mcp.tool()
+def lw_set_parent(child: str, parent: str) -> str:
+    """Reparent one item to another (ROADMAP.md's previously-unsolved
+    write gap - see PLAN.md 'ParentItem argument format'). Confirmed
+    root cause: the native ParentItem command silently no-ops when given
+    a name string instead of the numeric item ID it actually expects
+    (unlike SelectItem, which does resolve names). This wraps the fix:
+    resolve parent's name to its numeric ID via the read path, select
+    child by name (SelectItem does accept names), then send
+    ParentItem(id). Confirmed live: lw_get_hierarchy correctly showed
+    the new parent afterward, matching ground truth from the Motion
+    Options panel."""
+    id_resp = _query("get_item_id", parent)
+    result = id_resp.get("result", {})
+    parent_id = result.get("id")
+    if not parent_id:
+        return json.dumps({"error": "could not resolve parent item: %s" % parent, "detail": id_resp})
+    lw = _layout()
+    try:
+        lw.SelectItem(child)
+        lw.ParentItem(parent_id)
+        return json.dumps({"result": "parented %s to %s (id %s)" % (child, parent, parent_id)})
+    except Exception as exc:  # noqa: BLE001
+        return json.dumps({"error": str(exc)})
+
+
+@mcp.tool()
 def lw_get_hierarchy() -> str:
     """Get parent/child and IK (target/goal/pole) relationships for every
     object, light, and camera in the scene - e.g. before rigging on top

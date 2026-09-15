@@ -561,3 +561,113 @@ info (needs `SURF_*` constants not yet found via introspection).
    `lw_get_scene_info` - all confirmed working as of this write-up
    (`lw_ping`/`lw_get_scene_info` verification pending the Claude Desktop
    restart in step 4 taking effect - see PLAN.md status above).
+
+## ParentItem argument format (ROADMAP.md item 8, closing the item 7 gap)
+
+Session goal: solve the previously-documented gap where `ParentItem`
+via `lw_run_command` did not actually reparent items, confirmed only
+readable via the UI-set relationship. Live LightWave 2019.1.5 was
+available this session (a real Layout process, both Command Port and
+`lw_mcp_ring.py` active), so this was investigated with real
+round-trips rather than more static guessing.
+
+**Wrong theories tested and ruled out live, in order:**
+
+1. *Hidden modal requester.* Many LightWave generic commands pop a
+   dialog when they can't parse their argument, and a network-invoked
+   command can't dismiss it. Ruled out: took a screenshot of Layout
+   immediately after sending `ParentItem` - no dialog, just the normal
+   viewport, status bar showing `Current Item: ChildTest`, `Sel: 1`.
+2. *Needs a UI redraw to flush a queued scene-graph rebuild.* A first
+   test appeared to succeed - after the user opened Scene Editor,
+   `lw_get_hierarchy` showed `ChildTest.parent: "ParentTest"` where it
+   had shown `null` moments before. Tested the theory directly: created
+   a second pair (`ParentTest2`/`ChildTest2`), sent the same
+   `SelectItem`/`ParentItem` sequence, then asked the user to click once
+   in the viewport (a trivial redraw trigger) and re-checked. Still
+   `null`. Ruled out.
+3. *Just needs more elapsed real time.* Polled `lw_get_hierarchy`
+   repeatedly across a couple of minutes with no further action. Still
+   `null` for the second pair throughout. Ruled out.
+4. *The apparent first "success" was real.* Directly contradicted by
+   the user: "it didn't work. I parented the items myself." - meaning
+   the Scene Editor screenshot that appeared to show `ChildTest` nested
+   under `ParentTest` was the user manually dragging it while looking at
+   that panel, not the network command taking effect. The untouched
+   second pair staying `null` the whole time is independent confirmation
+   of the same thing. Real lesson: a single apparent success right after
+   a UI interaction, with no isolated control case, is not evidence -
+   this cost real time before the fresh, untouched `ParentTest2`/
+   `ChildTest2` pair caught it.
+
+**Root cause, found via Utilities > Commands > Cmd History:** this
+panel logs the literal native command LightWave runs for any action,
+UI-driven or network-driven. Asked the user to open it, then manually
+reparent a pair via Motion Options (the same manual method already
+proven to work, used originally to verify the read side). The log
+showed:
+
+```
+ParentItem 10000000
+SelectItem 10000000
+```
+
+A plain numeric ID, not a name. Meanwhile this connector's own failed
+network attempts (`SelectItem Camera` then `TargetItem ChildTest`,
+testing whether the failure was `ParentItem`-specific or affected the
+whole "reference another item" command family) logged as:
+
+```
+TargetItem 0
+```
+
+Confirming `TargetItem` fails identically to `ParentItem` - not a
+`ParentItem`-specific bug, but a shared argument-parsing convention
+across this command family (`ParentItem`, `TargetItem`, `GoalItem`,
+`PoleItem` all share the same `(itemid)` signature in
+`lwcommandport/layout/__init__.py`). When given a name string these
+commands can't parse as a numeric ID, they silently coerce the argument
+to `0` - a bogus/no-op ID - rather than erroring, resolving by name, or
+opening a dialog. `SelectItem` is the one exception: its own Cmd
+History entries (`SelectItem 10000003` for a name-based call) prove its
+command handler really does resolve names to IDs internally, unlike
+this family. This inconsistency across LightWave's native commands
+appears to be a genuine, longstanding NewTek API quirk, not something
+introduced by this connector.
+
+The IDs are sequential per item, assigned in creation order starting
+at `10000000` for the Object category in this scene: `ParentTest` was
+the first Null created this session and got `10000000`; `ParentTest2`
+(the 3rd Null created) got `10000002`; `ChildTest2` (4th) got
+`10000003`.
+
+**Getting the numeric ID from Python:** the missing piece had been
+sitting unused in this project since early on. `_mcp_diag_response.json`
+- the output of `lw_mcp_ring.py`'s `_introspect()` diagnostic from a
+much earlier session - lists module-level `lwsdk` helper functions
+never connected to this problem until now: `find_scene_item_by_name`,
+`itemid_to_str`, `str_to_itemid`. `_find_item(name)` (already existing
+in `lw_mcp_ring.py`, used by every read query) already returns the
+opaque `NodeID` handle for a name; `lwsdk.itemid_to_str()` converts
+that handle into exactly the numeric string Cmd History showed
+(confirmed live: `lw_get_item_id("ParentTest3")` returned `"10000004"`,
+matching the expected sequential position for the 5th Null created).
+
+**Fix, confirmed live end-to-end:** added a `get_item_id` query to
+`lw_mcp_ring.py` (wraps `_find_item` + `itemid_to_str`), exposed as
+`lw_get_item_id(name)` in `server.py`, plus `lw_set_parent(child,
+parent)` wrapping the full corrected sequence (resolve parent's numeric
+ID via the read path, `SelectItem(child)` by name since that's proven
+to work, `ParentItem(id)`). Tested against a completely fresh,
+untouched pair (`ParentTest3`/`ChildTest3`) specifically to avoid
+repeating mistake #4 above - `lw_get_hierarchy` afterward correctly
+showed `{"name": "ChildTest3", "parent": "ParentTest3", ...}`.
+
+**Not yet wrapped in their own tools, but fixed by the same mechanism:**
+`TargetItem`, `GoalItem`, `PoleItem` share the identical root cause and
+argument convention. `lw_get_item_id` already produces the correct
+argument for any of them via `lw_run_command` (e.g. `lw_run_command
+"TargetItem" [lw_get_item_id result]`); a dedicated wrapper analogous
+to `lw_set_parent` is a quick follow-up if IK rigging through this
+connector is ever needed, not attempted this session since it wasn't
+the reported gap.

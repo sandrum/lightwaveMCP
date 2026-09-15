@@ -153,10 +153,55 @@ real parent/child relationship, not just an empty scene - see PLAN.md.
 One real finding along the way: `ParentItem` via `lw_run_command` did
 NOT actually reparent items as tested (name-as-argument didn't take);
 the relationship had to be set through the UI to test the read side.
-That's a real, unsolved gap for anyone wanting to *write* parenting
-through this connector, not just read it. Bone-chain traversal
+That was a real gap for anyone wanting to *write* parenting through
+this connector - see item 8 below for the fix. Bone-chain traversal
 (bones within an object) is explicitly out of scope for now - no boned
 object existed yet to verify traversal safely against.
+
+## 8. Reparenting write path (the item 7 gap) - DONE
+
+Root-caused and fixed. The failure wasn't specific to `ParentItem` -
+`TargetItem` (same `(itemid)` signature) failed identically, silently
+no-op'ing rather than erroring or popping a dialog. First ruled out
+several wrong theories live: no modal requester appears (checked via
+screenshot), it's not a "needs a UI redraw to flush a pending
+scene-graph rebuild" thing (waited 15+ seconds and across multiple
+polls, still null), and an apparent one-off "success" turned out to be
+the user manually dragging items in Scene Editor while testing, not the
+command actually working (caught by testing a second, untouched pair
+of Nulls, which stayed unparented).
+
+The real root cause, found via Utilities > Commands > Cmd History
+(logs the literal native command LightWave runs for any UI action):
+a genuine manual reparent via Motion Options logs as `ParentItem
+10000000` - a plain numeric ID, not a name - while this connector's
+name-based attempts logged as `TargetItem 0`, proving the argument
+silently coerces to a bogus/no-op ID when it can't parse a name.
+`SelectItem` is the one exception in this command family that really
+does resolve names internally (confirmed by its own Cmd History
+entries showing the correctly-resolved ID). These per-item numeric IDs
+turned out to already be sequential and inspectable: `ParentTest` was
+`10000000`, `ChildTest3` created five Nulls later was `10000004`.
+
+The missing piece to convert a name into that ID from Python had
+actually been sitting unused since early in this project: an old
+`_introspect()` diagnostic dump (`_mcp_diag_response.json`) lists
+module-level `lwsdk.itemid_to_str()` / `lwsdk.str_to_itemid()` helpers
+that were never connected to this problem until now. Shipped as
+`lw_get_item_id(name)` (new `get_item_id` query in `lw_mcp_ring.py`)
+and `lw_set_parent(child, parent)` (wraps resolve-parent-id / select-
+child-by-name / `ParentItem(id)` into one call). Confirmed live on a
+completely fresh, untouched pair of Nulls (`ParentTest3`/`ChildTest3`)
+with `lw_get_hierarchy` correctly showing the new relationship
+afterward - not just re-checking the pair that had already been
+manually parented by hand.
+
+`TargetItem`/`GoalItem`/`PoleItem` share the exact same root cause
+(same argument convention, same command family) but aren't wrapped in
+their own convenience tools yet - `lw_get_item_id` already fixes the
+underlying problem for them; only a thin wrapper analogous to
+`lw_set_parent` is missing, would-be quick follow-up if IK rigging
+through this connector is needed.
 
 ## Recommended order
 
@@ -167,6 +212,7 @@ object existed yet to verify traversal safely against.
 5. ~~Modeler read path research~~ - researched, confirmed blocked
 6. ~~Render/camera automation~~ - done
 7. ~~Item hierarchy query~~ - done
+8. ~~Reparenting write path~~ - done
 
 Rationale: started with the cheapest, lowest-risk extensions of what's
 already proven (1, done), then opened the next major surface using a
@@ -181,4 +227,9 @@ item yet, confirming the project's core mechanisms are now solid. Item
 plug-in architecture) rather than guessing at a polling scheme. Item 7
 was added mid-stream from a real user need rather than pre-planned, and
 surfaced a genuine new gap (parenting via `lw_run_command` doesn't work)
-worth tracking separately if rigging needs a write path later.
+that item 8 came back to close. Item 8 is the project's clearest
+example yet of live ground-truth beating guesswork: several plausible
+theories (modal dialog, needs a UI redraw, needs more elapsed time)
+were tested and ruled out live before Cmd History - comparing what a
+real working UI action actually logs against what this connector's
+failed attempts logged - revealed the real root cause in one step.

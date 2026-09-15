@@ -67,10 +67,21 @@ and what's explicitly out of scope.
   plug-in). See `PLAN.md`/`ROADMAP.md` item 5 - not worth retrying
   without new information (NewTek support, or a newer SDK version).
 
-**Known gap:** reparenting items (`ParentItem` via `lw_run_command`)
-does **not** work as tested - the relationship had to be set through
-Layout's UI to prove `lw_get_hierarchy` reads it correctly. So hierarchy
-is readable, but not yet writable through this connector.
+**Reparenting** - `lw_set_parent(child, parent)` and `lw_get_item_id(name)`
+- fixed a real gap: `ParentItem` (and the same family - `TargetItem`,
+  `GoalItem`, `PoleItem`) silently no-ops when given an item's name
+  instead of the plain numeric ID LightWave's Command Port actually
+  expects for these specific commands (`SelectItem` is the one
+  exception that really does resolve names). Root-caused by comparing
+  Cmd History's log of a real UI-driven reparent (`ParentItem 10000000`)
+  against this connector's failed attempts (`TargetItem 0` - silently
+  coerced to a no-op, no error, no dialog). `lw_get_item_id` resolves a
+  name to that numeric ID via `lwsdk.itemid_to_str()`; `lw_set_parent`
+  wraps the full corrected sequence. Confirmed live on a fresh pair of
+  Nulls with no manual UI interference - see `PLAN.md` for the full
+  investigation. `TargetItem`/`GoalItem`/`PoleItem` aren't wrapped in
+  their own convenience tools yet, but `lw_get_item_id` is generic and
+  fixes the same root cause for any of them.
 
 ## Setup
 
@@ -161,7 +172,7 @@ reliably fixes it.
 ## Files
 
 - `lw_enable_command_port.py` — run once inside Layout. Enables Layout writes. Working.
-- `lw_mcp_ring.py` — Master plug-in enabling Layout reads via `LWComRing` (scene info, selection, camera/light/transform/surface/hierarchy/render-status queries). Needs both Add Plugins and Master Plugins activation. Working.
+- `lw_mcp_ring.py` — Master plug-in enabling Layout reads via `LWComRing` (scene info, selection, camera/light/transform/surface/hierarchy/render-status/item-id queries). Needs both Add Plugins and Master Plugins activation. Working.
 - `lw_mcp_render_monitor.py` — Render Display plug-in (`lwsdk.IFrameBuffer`) providing real render completion signaling for `lw_get_render_status`. Needs Add Plugins plus manual selection as the active Render Display. Working.
 - `lw_enable_modeler_command_port.py` — run once inside Modeler (Add Plugins, then Utilities > Additional). Enables Modeler writes. Working.
 - `lw_mcp_modeler_query.py` — Modeler read-path attempt. Works when invoked from inside Modeler's own UI, but confirmed unreachable over the network - kept for the record, not usable as-is. See `ROADMAP.md` item 5.

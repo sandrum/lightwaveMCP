@@ -301,6 +301,28 @@ def _get_hierarchy():
     return {"items": items}
 
 
+def _get_item_id(name):
+    """Resolve an item's name to the plain numeric ID string LightWave's
+    native item-reference commands (ParentItem, TargetItem, GoalItem,
+    PoleItem) actually expect on the Command Port - confirmed via Cmd
+    History showing real UI-driven actions log as e.g. "ParentItem
+    10000000", never a name. SelectItem is the odd one out: its command
+    handler resolves names internally (confirmed working via lw_name
+    string args throughout this project), but ParentItem/TargetItem do
+    not - passing a name silently coerces to argument 0 (a no-op), with
+    no error and no dialog. lwsdk.itemid_to_str() (a module-level
+    helper, found by grepping an old _introspect() diagnostic dump for
+    "itemid" - sitting unused in lwsdk.dir() since long before this was
+    identified as the actual root cause) converts the opaque NodeID
+    handle _find_item() already returns into exactly that numeric string
+    form. See PLAN.md 'ParentItem argument format' for the Cmd History
+    evidence."""
+    item = _find_item(name)
+    if item is None:
+        return {"error": "item not found: %s" % name}
+    return {"name": name, "id": lwsdk.itemid_to_str(item)}
+
+
 def _get_render_status():
     """Reads the status file written by lw_mcp_render_monitor.py's
     IFrameBuffer.open()/close() callbacks (ROADMAP.md item 6). Separate
@@ -412,6 +434,8 @@ def _handle_query(text):
             payload = {"result": _get_render_status()}
         elif command == "get_hierarchy":
             payload = {"result": _get_hierarchy()}
+        elif command == "get_item_id":
+            payload = {"result": _get_item_id(arg)}
         else:
             payload = {"error": "unknown command: %s" % command}
     except Exception as exc:  # noqa: BLE001
