@@ -420,30 +420,97 @@ def lw_get_item_id(name: str) -> str:
     return json.dumps(_query("get_item_id", name))
 
 
+def _resolve_item_id(name):
+    """Shared by lw_set_parent/lw_set_target/lw_set_goal/lw_set_pole -
+    all four native commands share the same "wants a numeric ID, not a
+    name" quirk (see lw_get_item_id's docstring), so they share this
+    resolve-then-select-then-send shape too."""
+    id_resp = _query("get_item_id", name)
+    return id_resp.get("result", {}).get("id"), id_resp
+
+
+def _set_reference_item(command, item, reference):
+    """Common body for lw_set_parent/lw_set_target/lw_set_goal/
+    lw_set_pole. Resolves BOTH item and reference to numeric IDs -
+    confirmed live that SelectItem(name) only reliably switches the
+    "current item" pointer this command family reads for Objects.
+    Tested targeting a Camera by name ("SelectItem Camera"): the
+    current OBJECT (an unrelated Null) got the target applied instead
+    of the Camera. Cmd History of the equivalent manual action (select
+    Camera, Motion Options, set Target Item) showed the real working
+    sequence uses SelectItem on the Camera's own numeric ID (e.g.
+    "SelectItem 30000000" - Camera/Light/Object each have their own ID
+    range, confirmed 10000000/20000000/30000000 respectively), not its
+    name. See PLAN.md 'ParentItem argument format' for the original
+    numeric-ID finding this extends."""
+    item_id, item_resp = _resolve_item_id(item)
+    if not item_id:
+        return json.dumps({"error": "could not resolve item: %s" % item, "detail": item_resp})
+    ref_id, ref_resp = _resolve_item_id(reference)
+    if not ref_id:
+        return json.dumps({"error": "could not resolve item: %s" % reference, "detail": ref_resp})
+    lw = _layout()
+    try:
+        lw.SelectItem(item_id)
+        getattr(lw, command)(ref_id)
+        return json.dumps({"result": "%s(%s) -> %s (ids %s -> %s)" % (command, item, reference, item_id, ref_id)})
+    except Exception as exc:  # noqa: BLE001
+        return json.dumps({"error": str(exc)})
+
+
 @mcp.tool()
 def lw_set_parent(child: str, parent: str) -> str:
     """Reparent one item to another (ROADMAP.md's previously-unsolved
     write gap - see PLAN.md 'ParentItem argument format'). Confirmed
-    root cause: the native ParentItem command silently no-ops when given
-    a name string instead of the numeric item ID it actually expects
-    (unlike SelectItem, which does resolve names). This wraps the fix:
-    resolve parent's name to its numeric ID via the read path, select
-    child by name (SelectItem does accept names), then send
-    ParentItem(id). Confirmed live: lw_get_hierarchy correctly showed
-    the new parent afterward, matching ground truth from the Motion
-    Options panel."""
-    id_resp = _query("get_item_id", parent)
-    result = id_resp.get("result", {})
-    parent_id = result.get("id")
-    if not parent_id:
-        return json.dumps({"error": "could not resolve parent item: %s" % parent, "detail": id_resp})
-    lw = _layout()
-    try:
-        lw.SelectItem(child)
-        lw.ParentItem(parent_id)
-        return json.dumps({"result": "parented %s to %s (id %s)" % (child, parent, parent_id)})
-    except Exception as exc:  # noqa: BLE001
-        return json.dumps({"error": str(exc)})
+    root cause: ParentItem (and this whole command family - TargetItem/
+    GoalItem/PoleItem) silently no-ops when given a name string instead
+    of the numeric item ID it actually expects, AND relying on
+    SelectItem(name) to pick the item being modified is only reliable
+    for Objects - resolves both child and parent to their numeric IDs
+    before sending, rather than trusting SelectItem's name resolution
+    at all. Confirmed live: lw_get_hierarchy correctly showed the new
+    parent afterward, matching ground truth from the Motion Options
+    panel, on a fresh untouched pair of Nulls."""
+    return _set_reference_item("ParentItem", child, parent)
+
+
+@mcp.tool()
+def lw_set_target(item: str, target: str) -> str:
+    """Set an item's IK/camera/light target (e.g. point a Camera or
+    Light at a Null) - same fix as lw_set_parent. Confirmed live for
+    all three categories: targeting by Camera name alone
+    (SelectItem("Camera")) applied the target to an unrelated,
+    already-current Object instead of the Camera - Cmd History of the
+    equivalent manual action showed the real working sequence selects
+    the Camera by its own numeric ID (e.g. "SelectItem 30000000", not
+    "SelectItem Camera"). Object/Light/Camera IDs live in separate
+    numeric ranges (confirmed 10000000/20000000/30000000 respectively).
+    Fixed by resolving both `item` and `target` to numeric IDs first.
+    Confirmed live after the fix: both Camera.target and Light.target
+    correctly showed the new target via lw_get_hierarchy. See PLAN.md
+    'ParentItem argument format' for the full history."""
+    return _set_reference_item("TargetItem", item, target)
+
+
+@mcp.tool()
+def lw_set_goal(item: str, goal: str) -> str:
+    """Set an IK chain's goal item (GoalItem) - same numeric-ID fix as
+    lw_set_parent/lw_set_target. Untested live as of this writing (no
+    IK chain was available to verify against), but GoalItem shares the
+    exact same (itemid) signature and command family in
+    lwcommandport/layout/__init__.py, so the same fix should apply;
+    treat an unexpected result as a signal to re-verify via Cmd History
+    rather than assume this one behaves differently."""
+    return _set_reference_item("GoalItem", item, goal)
+
+
+@mcp.tool()
+def lw_set_pole(item: str, pole: str) -> str:
+    """Set an IK chain's pole item (PoleItem) - same numeric-ID fix as
+    lw_set_parent/lw_set_target. Same untested-live caveat as
+    lw_set_goal - no IK chain was available this session to confirm
+    against, only inferred from the shared command family."""
+    return _set_reference_item("PoleItem", item, pole)
 
 
 @mcp.tool()

@@ -67,21 +67,29 @@ and what's explicitly out of scope.
   plug-in). See `PLAN.md`/`ROADMAP.md` item 5 - not worth retrying
   without new information (NewTek support, or a newer SDK version).
 
-**Reparenting** - `lw_set_parent(child, parent)` and `lw_get_item_id(name)`
-- fixed a real gap: `ParentItem` (and the same family - `TargetItem`,
-  `GoalItem`, `PoleItem`) silently no-ops when given an item's name
-  instead of the plain numeric ID LightWave's Command Port actually
-  expects for these specific commands (`SelectItem` is the one
-  exception that really does resolve names). Root-caused by comparing
-  Cmd History's log of a real UI-driven reparent (`ParentItem 10000000`)
-  against this connector's failed attempts (`TargetItem 0` - silently
-  coerced to a no-op, no error, no dialog). `lw_get_item_id` resolves a
-  name to that numeric ID via `lwsdk.itemid_to_str()`; `lw_set_parent`
-  wraps the full corrected sequence. Confirmed live on a fresh pair of
-  Nulls with no manual UI interference - see `PLAN.md` for the full
-  investigation. `TargetItem`/`GoalItem`/`PoleItem` aren't wrapped in
-  their own convenience tools yet, but `lw_get_item_id` is generic and
-  fixes the same root cause for any of them.
+**Item relationships** - `lw_set_parent(child, parent)`,
+`lw_set_target(item, target)`, `lw_set_goal(item, goal)`,
+`lw_set_pole(item, pole)`, `lw_get_item_id(name)`
+- fixed a real gap: `ParentItem`/`TargetItem`/`GoalItem`/`PoleItem`
+  silently no-op when given an item's name instead of the plain numeric
+  ID LightWave's Command Port actually expects for these specific
+  commands. Two related bugs, both root-caused via Cmd History
+  (Utilities → Commands → Cmd History, which logs the literal native
+  command any UI action runs): (1) these commands need a numeric ID
+  argument, not a name - `SelectItem` is the one exception that really
+  does resolve names; (2) `SelectItem(name)` itself is only reliable
+  for Objects - Camera/Light need `SelectItem` called with their own
+  numeric ID too, not their name, to correctly become the "current
+  item" this command family reads. Each item-type category has its own
+  ID range (Objects `10000000+`, Lights `20000000+`, Cameras
+  `30000000+`). `lw_get_item_id` resolves a name to its numeric ID via
+  `lwsdk.itemid_to_str()`; the four `lw_set_*` tools resolve BOTH
+  arguments to IDs and never trust `SelectItem`'s name resolution.
+  Confirmed live: `lw_set_parent`/`lw_set_target` work for all three
+  item categories (Object/Light/Camera); `lw_set_goal`/`lw_set_pole`
+  are inferred from the same command family but untested (no IK chain
+  was available to verify against) - see `PLAN.md` for the full
+  investigation.
 
 ## Setup
 

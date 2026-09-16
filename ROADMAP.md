@@ -203,6 +203,29 @@ underlying problem for them; only a thin wrapper analogous to
 `lw_set_parent` is missing, would-be quick follow-up if IK rigging
 through this connector is needed.
 
+**Follow-up (same session-plus-one), a second related bug found while
+building that follow-up:** shipped `lw_set_target`/`lw_set_goal`/
+`lw_set_pole`, wrapping `TargetItem`/`GoalItem`/`PoleItem` the same way
+as `lw_set_parent`. Live-testing `lw_set_target` against a real Camera
+surfaced a second, distinct bug in the original wrapper shape:
+`SelectItem(name)` - trusted to pick which item is being modified,
+since it reliably resolves Object names - does NOT reliably do the
+same for Camera/Light. A name-based attempt to target the Camera
+silently applied the target to an unrelated, already-current Object
+instead, no error. Cmd History of the real manual action (select
+Camera, Motion Options, set Target Item) showed the working sequence
+selects the Camera by its own numeric ID, not its name - and revealed
+each item-type category has its own ID range (Objects `10000000+`,
+Lights `20000000+`, Cameras `30000000+`). Fixed by resolving BOTH
+arguments to numeric IDs before sending, never trusting SelectItem's
+name resolution at all. Confirmed live for all three categories
+(Object/Light/Camera) after the fix, with `lw_set_parent` re-verified
+to still work (no regression). See PLAN.md "Second finding" for the
+full writeup, including a process-level lesson: a Claude Desktop
+restart can leave a stale `server.py` process running, meaning a
+just-fixed tool can still exhibit the old bug until a true full
+restart (verified via the process list) actually takes effect.
+
 ## Recommended order
 
 1. ~~Layout read queries (selection, camera/light)~~ - done

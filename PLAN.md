@@ -671,3 +671,58 @@ argument for any of them via `lw_run_command` (e.g. `lw_run_command
 to `lw_set_parent` is a quick follow-up if IK rigging through this
 connector is ever needed, not attempted this session since it wasn't
 the reported gap.
+
+## Second finding: SelectItem(name) isn't reliable for Camera/Light either (follow-up session)
+
+Wrapped `TargetItem`/`GoalItem`/`PoleItem` as `lw_set_target`/
+`lw_set_goal`/`lw_set_pole`, reusing `lw_set_parent`'s shape (resolve
+the reference's numeric ID, `SelectItem(item)` by name, send
+`command(id)`). Live-tested `lw_set_target(item="Camera",
+target="ChildTest")` against real LightWave - it silently applied the
+target to `ChildTest3` (an unrelated Null that happened to be the
+already-current Object) instead of Camera. Confirmed via
+`lw_get_selection` this wasn't a timing issue (waited, re-checked,
+`SelectItem("Camera")` provably changed nothing observable).
+
+Root cause, again found via Cmd History (select Camera in Layout,
+Motion Options, set Target Item to ChildTest manually):
+
+```
+EditCameras 30000000
+SelectItem 30000000
+MotionOptions
+TargetItem 10000001
+```
+
+The real working sequence selects the Camera by its own **numeric ID**
+(`30000000`), not by name. So `SelectItem(name)`'s internal name
+resolution - which does work reliably for Objects (confirmed
+repeatedly, e.g. `SelectItem ChildTest2` logged as `SelectItem
+10000003`) - is not reliable for Camera/Light. This also revealed each
+item-type category has its own numeric ID range: Objects start at
+`10000000`, Lights at `20000000`, Cameras at `30000000` (confirmed:
+`lw_get_item_id("Camera")` returned `"30000000"`, `lw_get_item_id`
+against the scene's one Light returned `"20000000"`).
+
+**Fix:** `_set_reference_item()` in `server.py` now resolves BOTH the
+`item` and the `reference` to numeric IDs before sending anything -
+`SelectItem(item_id)`, not `SelectItem(item_name)`. Never rely on
+SelectItem's name resolution for this command family again, even
+though it happens to work for Objects; resolving both sides uniformly
+is simpler than tracking which categories are "safe" by name.
+Confirmed live after the fix: `lw_set_target("Camera", "ChildTest")`
+correctly showed `Camera.target: "ChildTest"` via `lw_get_hierarchy`,
+and `lw_set_target("Light", "ParentTest4")` correctly showed
+`Light.target: "ParentTest4"`. Re-verified `lw_set_parent` still works
+after the change (no regression) on a fresh pair, `ParentTest4`/
+`ChildTest4`.
+
+Process note: this fix needed two Claude Desktop restarts to verify -
+the first restart left a stale `server.py` process still running
+(confirmed via `tasklist`/`Get-CimInstance Win32_Process`, two
+processes with the same command line, one clearly older), meaning the
+live connection may have still been talking to the pre-fix code. A
+fully-quit-and-reopened restart (both processes freshly spawned
+seconds apart) was needed before the new tool definitions actually
+took effect. Worth checking process list rather than assuming a
+restart worked if a just-fixed tool still shows the old behavior.
