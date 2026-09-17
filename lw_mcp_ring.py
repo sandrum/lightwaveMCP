@@ -125,42 +125,59 @@ def _get_selection():
     return {"items": items, "selected": [i["name"] for i in items if i["selected"]]}
 
 
+def _current_time():
+    """ROADMAP.md's long-standing "querying LightWave's live playhead
+    from Python is unsolved" limitation - solved. lwsdk.LWTimeInfo() is
+    a plain-attribute class in the same style as LWSceneInfo (already
+    proven safe elsewhere in this file) - found via a widened
+    introspection pass (_probe_time, kept below) after the original
+    _introspect() never searched for time/frame-related keywords at
+    all. `.time` is the live playhead position in seconds, exactly the
+    unit every animatable call in this file already expects (they used
+    to hardcode 0.0 here). Confirmed live: GoToFrame(30) via the write
+    path followed by this returning the corresponding non-zero seconds
+    value, and an item keyframed at frame 0/30 correctly reading back
+    its frame-30 value here instead of the frame-0 default."""
+    return lwsdk.LWTimeInfo().time
+
+
 def _get_camera_info(name):
     """Confirmed live signatures: resolution(id) takes just the item ID;
     focalLength/fStop/fovAngles/zoomFactor are animatable channels and
-    need a second (time) argument - passing 0.0 (start of scene), NOT the
-    live playhead position, since there's no confirmed way to query
-    current time from Python yet. Good enough for non-animated cameras;
-    a real "current time" query is still open (see ROADMAP.md)."""
+    need a second (time) argument - now the real live playhead time via
+    _current_time(), not a hardcoded 0.0 (see _current_time's
+    docstring)."""
     cam_id = _find_item(name)
     if cam_id is None:
         return {"error": "camera not found: %s" % name}
     ci = lwsdk.LWCameraInfo()
+    t = _current_time()
     return {
         "name": name,
         "resolution": list(ci.resolution(cam_id)),
-        "focal_length_mm": ci.focalLength(cam_id, 0.0),
-        "f_stop": ci.fStop(cam_id, 0.0),
-        "fov_angles_h_v": list(ci.fovAngles(cam_id, 0.0)),
-        "zoom_factor": ci.zoomFactor(cam_id, 0.0),
-        "note": "animatable values evaluated at time=0.0, not the live playhead",
+        "focal_length_mm": ci.focalLength(cam_id, t),
+        "f_stop": ci.fStop(cam_id, t),
+        "fov_angles_h_v": list(ci.fovAngles(cam_id, t)),
+        "zoom_factor": ci.zoomFactor(cam_id, t),
+        "evaluated_at_time": t,
     }
 
 
 def _get_light_info(name):
-    """Same time=0.0 caveat as _get_camera_info."""
+    """Same live-time fix as _get_camera_info."""
     light_id = _find_item(name)
     if light_id is None:
         return {"error": "light not found: %s" % name}
     li = lwsdk.LWLightInfo()
+    t = _current_time()
     return {
         "name": name,
         "type": li.type(light_id),
         "falloff": li.falloff(light_id),
-        "color_rgb": _vec_to_list(li.color(light_id, 0.0)),
-        "intensity": li.intensity(light_id, 0.0),
-        "range": li.range(light_id, 0.0),
-        "note": "animatable values evaluated at time=0.0, not the live playhead",
+        "color_rgb": _vec_to_list(li.color(light_id, t)),
+        "intensity": li.intensity(light_id, t),
+        "range": li.range(light_id, t),
+        "evaluated_at_time": t,
     }
 
 
@@ -175,17 +192,18 @@ def _get_transform(name):
     Python binding is the 3-arg form `item_info.param(item_id, type,
     time)` returning the vector directly (no separate out-parameter,
     matching the pattern already proven for LWCameraInfo/LWLightInfo in
-    this file). Same time=0.0 caveat as camera/light info."""
+    this file). Same live-time fix as camera/light info."""
     target = _find_item(name)
     if target is None:
         return {"error": "item not found: %s" % name}
     ii = lwsdk.LWItemInfo()
+    t = _current_time()
     return {
         "name": name,
-        "position": _vec_to_list(ii.param(target, lwsdk.LWIP_POSITION, 0.0)),
-        "rotation": _vec_to_list(ii.param(target, lwsdk.LWIP_ROTATION, 0.0)),
-        "scale": _vec_to_list(ii.param(target, lwsdk.LWIP_SCALING, 0.0)),
-        "note": "animatable values evaluated at time=0.0, not the live playhead",
+        "position": _vec_to_list(ii.param(target, lwsdk.LWIP_POSITION, t)),
+        "rotation": _vec_to_list(ii.param(target, lwsdk.LWIP_ROTATION, t)),
+        "scale": _vec_to_list(ii.param(target, lwsdk.LWIP_SCALING, t)),
+        "evaluated_at_time": t,
     }
 
 
@@ -404,6 +422,18 @@ def _introspect():
     return {"matches": matches, "probes": probes}
 
 
+def _get_current_time():
+    """Exposes _current_time()'s fix directly - useful on its own to
+    confirm what time an lw_get_camera_info/lw_get_light_info/
+    lw_get_transform call will evaluate at, without needing an
+    animated item to notice a difference. frame is derived from
+    time/framesPerSecond via LWSceneInfo (already proven safe
+    elsewhere in this file) since LWTimeInfo only exposes seconds."""
+    t = _current_time()
+    fps = lwsdk.LWSceneInfo().framesPerSecond
+    return {"time": t, "frame": t * fps if fps else None}
+
+
 def _handle_query(text):
     parts = text.split(None, 1)
     command = parts[0] if parts else "ping"
@@ -436,6 +466,8 @@ def _handle_query(text):
             payload = {"result": _get_hierarchy()}
         elif command == "get_item_id":
             payload = {"result": _get_item_id(arg)}
+        elif command == "get_current_time":
+            payload = {"result": _get_current_time()}
         else:
             payload = {"error": "unknown command: %s" % command}
     except Exception as exc:  # noqa: BLE001

@@ -270,18 +270,20 @@ def lw_get_selection() -> str:
 @mcp.tool()
 def lw_get_camera_info(name: str = "Camera") -> str:
     """Get a camera's resolution, focal length, f-stop, field of view,
-    and zoom factor. Note: animatable values (focal length, f-stop, fov,
-    zoom) are evaluated at time=0.0, not the live playhead position -
-    querying the actual current time isn't solved yet (see ROADMAP.md).
-    Fine for cameras that aren't animated."""
+    and zoom factor. Animatable values (focal length, f-stop, fov,
+    zoom) are evaluated at LightWave's actual live playhead position
+    (ROADMAP.md's long-standing "querying current time" limitation is
+    solved - see lw_get_current_time), not a hardcoded time - the
+    response's evaluated_at_time field reports exactly what time was
+    used."""
     return json.dumps(_query("get_camera_info", name))
 
 
 @mcp.tool()
 def lw_get_light_info(name: str = "Light") -> str:
     """Get a light's type, falloff, color (RGB), intensity, and range.
-    Same time=0.0 caveat as lw_get_camera_info for the animatable
-    values."""
+    Same live-playhead evaluation as lw_get_camera_info for the
+    animatable values."""
     return json.dumps(_query("get_light_info", name))
 
 
@@ -290,9 +292,27 @@ def lw_get_transform(name: str = "TransformTest") -> str:
     """Get an item's position, rotation, and scale from the live scene.
     Uses LWItemInfo().param() - confirmed via NewTek's C SDK docs and
     real-world Python plugin code, NOT the LWChannelInfo/nextGroup path
-    that crashed Layout during development (see PLAN.md). Same time=0.0
-    caveat as lw_get_camera_info/lw_get_light_info for animated items."""
+    that crashed Layout during development (see PLAN.md). Same
+    live-playhead evaluation as lw_get_camera_info/lw_get_light_info -
+    confirmed live on an animated item: correctly returned the
+    interpolated frame-15 position, not the frame-0 default, when
+    queried after GoToFrame(15)."""
     return json.dumps(_query("get_transform", name))
+
+
+@mcp.tool()
+def lw_get_current_time() -> str:
+    """Get the time (seconds) and frame LightWave's live playhead is
+    currently at - the same value lw_get_camera_info/lw_get_light_info/
+    lw_get_transform now evaluate animatable channels at. Useful to
+    confirm what time a read will use without needing an animated item,
+    or to check the playhead position without moving it via GoToFrame.
+    Uses lwsdk.LWTimeInfo() - a plain-attribute class in the same style
+    as LWSceneInfo, found via a widened keyword search after the
+    original introspection pass never looked for time/frame-related
+    names at all. See PLAN.md 'live playhead time query' for the full
+    investigation."""
+    return json.dumps(_query("get_current_time"))
 
 
 @mcp.tool()
@@ -510,6 +530,8 @@ def lw_set_pole(item: str, pole: str) -> str:
     plain Null with lw_get_hierarchy correctly showing both
     afterward."""
     return _set_reference_item("PoleItem", item, pole)
+
+
 
 
 @mcp.tool()

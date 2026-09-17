@@ -36,12 +36,16 @@ and what's explicitly out of scope.
   by name. Useful before rigging on top of something already parented.
   Does **not** walk bone chains within an object yet (no boned object
   has been available to verify that traversal safely against).
+- `lw_get_current_time` - the live playhead's frame and time (seconds).
 
-  **Known limitation, carried forward:** camera/light/transform
-  animatable values are evaluated at `time=0.0` (scene start), not
-  LightWave's live playhead - querying the actual current frame from
-  Python is still unsolved. Fine for non-animated items, wrong for
-  animated ones.
+  **Formerly a known limitation, now solved:** camera/light/transform
+  animatable values (`lw_get_camera_info`/`lw_get_light_info`/
+  `lw_get_transform`) used to be hardcoded to `time=0.0` (scene start)
+  instead of LightWave's live playhead. Fixed via `lwsdk.LWTimeInfo()`
+  - confirmed live: keyframed a Null at frame 0/frame 30, moved the
+  playhead to frame 15 with `GoToFrame`, and `lw_get_transform`
+  correctly returned the interpolated frame-15 position instead of the
+  frame-0 default. See `PLAN.md` for the full investigation.
 
 **Render / camera automation**
 - `lw_set_camera_resolution(width, height)` - wraps `FrameSize` (a

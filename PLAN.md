@@ -749,3 +749,81 @@ parent and a target set from earlier testing):
 
 No further work needed here - all four `lw_set_*` tools are now fully
 live-confirmed.
+
+## Live playhead time query (ROADMAP.md item 9, the item 1 limitation carried since the start)
+
+Goal: solve the oldest open limitation in this project - every
+animatable read (`lw_get_camera_info`/`lw_get_light_info`/
+`lw_get_transform`) has been hardcoded to `time=0.0` since item 1,
+because there was no confirmed way to query LightWave's live playhead
+position from Python.
+
+**Root cause of why this looked unsolved:** it wasn't that the SDK
+lacks the capability - the original `_introspect()` diagnostic (used
+to find `LWCameraInfo`/`LWLightInfo` back in item 1) searched
+`dir(lwsdk)` for a fixed list of substrings (`Channel`, `Surface`,
+`Camera`, `Light`, `Item`, `Select`, `State`, `Transform`, `Scene`,
+`Bound`) that simply never included anything time-related. Nobody had
+looked. A widened probe (temporary `lw_probe_time`/`_probe_time`,
+searching `Time`/`Frame`/`Current`/`Play`/`Clock`/`Tick`) found it
+immediately:
+
+- `lwsdk.LWTimeInfo()` - a plain-attribute class (`frame`, `time`) in
+  exactly the same simple style as `LWSceneInfo`, already proven safe
+  elsewhere in this connector. `.time` is the live playhead position in
+  seconds - exactly the unit every animatable call already expected
+  (they'd been passing a hardcoded `0.0` in that same unit).
+- `lwsdk.LWInterfaceInfo()` also exposes `curTime` as a second
+  candidate, not used since `LWTimeInfo` matched the codebase's
+  existing pattern more directly.
+
+**Fix:** added a `_current_time()` helper in `lw_mcp_ring.py`
+(`lwsdk.LWTimeInfo().time`) and swapped the hardcoded `0.0` for it in
+`_get_camera_info`/`_get_light_info`/`_get_transform`, each now also
+reporting `evaluated_at_time` in its response instead of a static
+"note" about the old limitation. Added a permanent `get_current_time`
+query/`lw_get_current_time` tool (frame derived from
+`time * LWSceneInfo().framesPerSecond`) so the evaluation time can be
+checked directly without needing an animated item. Removed the
+temporary `lw_probe_time` tool/`_probe_time` function once the fix
+shipped, per this project's established pattern for diagnostic-only
+code.
+
+**Confirmed live with a real animated item**, not just trusting the
+mechanism's plausibility from its method signature: created a fresh
+Null (`TimeTest`), keyframed it at frame 0 (position 0,0,0 via
+`lw_set_keyframe`) and frame 30 (position 10,10,10), moved the
+playhead to frame 15 via `GoToFrame` (already proven-reachable), then:
+
+- `lw_get_current_time` correctly returned `{"frame": 15.0, "time":
+  0.5}` (30fps).
+- `lw_get_transform("TimeTest")` correctly returned an interpolated
+  position of ~(6.208, 6.208, 6.208) - not the frame-0 default of
+  (0,0,0), and notably not a naive linear midpoint of 5.0 either. This
+  matches LightWave's default TCB/spline easing curve shape: the
+  original item-4 keyframe test (0→5 over the same 0→30 frame range)
+  read back 3.104 at frame 15 - almost exactly half of 6.208, i.e. the
+  same easing curve scaled 2x for this test's 0→10 range. That
+  consistency is strong independent evidence the fix is evaluating at
+  the correct time, not coincidentally producing a plausible-looking
+  number.
+
+**Process detour worth recording:** partway through verifying this,
+`lw_ping` and writes both stopped working, and the Ring listener's
+debug log showed it endlessly attach/detach-cycling without ever
+receiving an event - exactly the signature of the already-documented
+Master Plugin activation flakiness. Several remove/re-add cycles were
+spent chasing that before checking the title bar and noticing it no
+longer showed `(CP: 9735)` at all, and the Scene Editor had reset to
+just the default `Light`/`Camera` - Layout itself had been restarted
+at some point, and setup step 1 (enabling the Command Port itself) had
+never been redone. Once that was fixed, the Ring listener worked
+immediately. Lesson: if symptoms that look exactly like the known
+Master Plugin flakiness persist past 2-3 retries, check the title bar
+for `(CP: 9735)` and the scene contents (are previous session's test
+items still there?) before assuming it's the same flaky-activation
+issue again - it might be a full Layout restart instead, which needs
+setup step 1 redone, not just step 2.
+
+With this, every roadmap item is done except item 5 (Modeler reads),
+which remains a documented, confirmed dead end.

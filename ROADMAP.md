@@ -27,11 +27,9 @@ been shown to be out of sync with this build):
 - `LWLightInfo().color()` returns a `PCore::Vector` SWIG object, not
   directly JSON-serializable - converted via `.x`/`.y`/`.z`.
 
-**Known limitation, carried forward:** these tools evaluate animatable
-values at `time=0.0` (scene start), not the live playhead position.
-Querying LightWave's actual current time from Python is still an open
-question - fine for non-animated cameras/lights, wrong for animated
-ones. Worth solving before building on top of this further.
+**Known limitation, carried forward - SOLVED, see item 9:** these tools
+used to evaluate animatable values at `time=0.0` (scene start) instead
+of the live playhead position. Fixed via `lwsdk.LWTimeInfo()`.
 
 **Descoped this round** (see items below): item transform
 (position/rotation/scale) and surface/material info. Transform needs
@@ -238,6 +236,42 @@ showed the correct new relationship alongside the existing
 fully confirmed live, closing this out completely - no remaining
 untested tool in this family.
 
+## 9. Live playhead time query (the item 1 limitation, carried since the start) - DONE
+
+Solved. The original `_introspect()` diagnostic (used to find
+`LWCameraInfo`/`LWLightInfo` back in item 1) never searched for
+time/frame-related keywords at all - a real gap in that search, not
+evidence the SDK lacked a current-time query. A widened keyword search
+(`Time`/`Frame`/`Current`/`Play`/`Clock`/`Tick`) found
+`lwsdk.LWTimeInfo()`, a plain-attribute class in the same simple style
+as `LWSceneInfo` (already proven safe elsewhere in this connector) -
+`.time` is the live playhead position in seconds, exactly the unit
+every animatable call already expected (they used to hardcode `0.0`
+here). `lw_get_camera_info`/`lw_get_light_info`/`lw_get_transform` now
+use it instead of the hardcoded value, and a new `lw_get_current_time`
+tool exposes it directly.
+
+Confirmed live with a real animated item, not just reading the
+mechanism's plausibility: keyframed a fresh Null (`TimeTest`) at frame
+0 (position 0,0,0) and frame 30 (position 10,10,10), moved the
+playhead to frame 15 via `GoToFrame`, and `lw_get_transform` correctly
+returned an interpolated position (~6.21 on each axis, matching
+LightWave's default spline easing curve shape - not a naive linear
+midpoint of 5.0, and consistent with the exact same easing shape seen
+in the original item-4 keyframe test scaled 2x) instead of the
+frame-0 default. `lw_get_current_time` independently confirmed
+`frame: 15.0, time: 0.5` (30fps) at the same moment.
+
+This required rediscovering, mid-session, that Layout itself had been
+restarted at some point without redoing setup step 1 (Command Port
+enable) - every symptom (writes silently not appearing, the Ring
+listener endlessly attach/detach-cycling without ever receiving an
+event) looked exactly like the already-documented Master Plugin
+activation flakiness, and several remove/re-add cycles were spent on
+that before checking the title bar for `(CP: 9735)` and noticing it
+was missing. Worth checking that first next time symptoms look like
+the known flakiness but persist past 2-3 retries.
+
 ## Recommended order
 
 1. ~~Layout read queries (selection, camera/light)~~ - done
@@ -248,6 +282,7 @@ untested tool in this family.
 6. ~~Render/camera automation~~ - done
 7. ~~Item hierarchy query~~ - done
 8. ~~Reparenting write path~~ - done
+9. ~~Live playhead time query~~ - done
 
 Rationale: started with the cheapest, lowest-risk extensions of what's
 already proven (1, done), then opened the next major surface using a
@@ -268,3 +303,9 @@ theories (modal dialog, needs a UI redraw, needs more elapsed time)
 were tested and ruled out live before Cmd History - comparing what a
 real working UI action actually logs against what this connector's
 failed attempts logged - revealed the real root cause in one step.
+Item 9 closed out the oldest open limitation in the whole project
+(carried since item 1) by fixing the original introspection's real
+gap - it simply never searched for the right keywords - rather than
+concluding the SDK lacked the capability. With this, every roadmap
+item is done except item 5 (Modeler reads), which remains a
+documented, confirmed dead end.
