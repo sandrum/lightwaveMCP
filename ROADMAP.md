@@ -226,6 +226,18 @@ restart can leave a stale `server.py` process running, meaning a
 just-fixed tool can still exhibit the old bug until a true full
 restart (verified via the process list) actually takes effect.
 
+**`lw_set_goal`/`lw_set_pole` live-verified (immediate follow-up):**
+turned out not to need bones or a true IK chain to test at all -
+`goal()`/`pole()` are generic per-item properties in the SDK
+(`lw_get_hierarchy` already queried them for every item type from the
+start), so both were confirmed by setting them on a plain Null
+(`ChildTest3`, which already had a parent and target set from earlier
+testing) and reading back `lw_get_hierarchy` - `goal`/`pole` both
+showed the correct new relationship alongside the existing
+`parent`/`target` on the same item. All four `lw_set_*` tools are now
+fully confirmed live, closing this out completely - no remaining
+untested tool in this family.
+
 ## Recommended order
 
 1. ~~Layout read queries (selection, camera/light)~~ - done

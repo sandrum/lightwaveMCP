@@ -87,9 +87,9 @@ and what's explicitly out of scope.
   arguments to IDs and never trust `SelectItem`'s name resolution.
   Confirmed live: `lw_set_parent`/`lw_set_target` work for all three
   item categories (Object/Light/Camera); `lw_set_goal`/`lw_set_pole`
-  are inferred from the same command family but untested (no IK chain
-  was available to verify against) - see `PLAN.md` for the full
-  investigation.
+  confirmed too - no bones/true IK chain needed to test, since
+  `goal()`/`pole()` are generic per-item properties, set and read back
+  correctly on a plain Null - see `PLAN.md` for the full investigation.
 
 ## Setup
 

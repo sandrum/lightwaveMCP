@@ -726,3 +726,26 @@ fully-quit-and-reopened restart (both processes freshly spawned
 seconds apart) was needed before the new tool definitions actually
 took effect. Worth checking process list rather than assuming a
 restart worked if a just-fixed tool still shows the old behavior.
+
+## lw_set_goal/lw_set_pole live verification (closing the last untested tool)
+
+Expected this to need setting up a real IK chain (bones, or at least a
+proper Full-Body IK setup) to test meaningfully. Turned out not to:
+`goal()`/`pole()` are generic per-item properties in the SDK -
+`lw_get_hierarchy` has queried them for every item type since
+ROADMAP.md item 7, regardless of whether the item is actually part of
+an active IK chain. So both were tested directly against a plain Null
+already in the scene (`ChildTest3`, which by this point already had a
+parent and a target set from earlier testing):
+
+- `lw_set_goal("ChildTest3", "ParentTest2")` -> `lw_get_hierarchy`
+  correctly showed `"goal": "ParentTest2"`.
+- `lw_set_pole("ChildTest3", "ParentTest")` -> `lw_get_hierarchy`
+  correctly showed `"pole": "ParentTest"`, alongside the still-correct
+  `parent`/`target`/`goal` from earlier - all four relationship types
+  set correctly on one item at once, a good comprehensive confirmation
+  that the fix generalizes across the whole command family rather than
+  being coincidentally right for `ParentItem`/`TargetItem` alone.
+
+No further work needed here - all four `lw_set_*` tools are now fully
+live-confirmed.

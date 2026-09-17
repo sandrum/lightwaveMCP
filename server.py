@@ -494,22 +494,21 @@ def lw_set_target(item: str, target: str) -> str:
 
 @mcp.tool()
 def lw_set_goal(item: str, goal: str) -> str:
-    """Set an IK chain's goal item (GoalItem) - same numeric-ID fix as
-    lw_set_parent/lw_set_target. Untested live as of this writing (no
-    IK chain was available to verify against), but GoalItem shares the
-    exact same (itemid) signature and command family in
-    lwcommandport/layout/__init__.py, so the same fix should apply;
-    treat an unexpected result as a signal to re-verify via Cmd History
-    rather than assume this one behaves differently."""
+    """Set an item's IK goal (GoalItem) - same numeric-ID-for-both-
+    arguments fix as lw_set_parent/lw_set_target. Confirmed live: no
+    bones/true IK chain needed to test, since goal()/pole() are
+    generic per-item properties in the SDK (lw_get_hierarchy already
+    queries them for every item type) - set on a plain Null,
+    lw_get_hierarchy correctly showed the new goal afterward."""
     return _set_reference_item("GoalItem", item, goal)
 
 
 @mcp.tool()
 def lw_set_pole(item: str, pole: str) -> str:
-    """Set an IK chain's pole item (PoleItem) - same numeric-ID fix as
-    lw_set_parent/lw_set_target. Same untested-live caveat as
-    lw_set_goal - no IK chain was available this session to confirm
-    against, only inferred from the shared command family."""
+    """Set an item's IK pole (PoleItem) - same fix as lw_set_goal.
+    Confirmed live the same way, set alongside a goal on the same
+    plain Null with lw_get_hierarchy correctly showing both
+    afterward."""
     return _set_reference_item("PoleItem", item, pole)
 
 
