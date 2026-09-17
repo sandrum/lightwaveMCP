@@ -1,0 +1,12 @@
+.idea/
+__pycache__/
+*.pyc
+
+# Runtime state written by the currently-active read path on every
+# query/render - churns every session, unlike the frozen _mcp_diag*
+# files (superseded plugins, kept tracked as historical evidence - see
+# PLAN.md/ROADMAP.md).
+_mcp_response.json
+_mcp_ring_debug.log
+_mcp_render_status.json
+_mcp_render_debug.log
