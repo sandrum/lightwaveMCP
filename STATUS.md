@@ -7,8 +7,9 @@ tool list, see `README.md`.
 
 ## Where this stands
 
-The connector is feature-complete against its original plan. All 10
-roadmap items are done except one confirmed dead end (Modeler reads).
+The connector is feature-complete against its original plan. All 11
+roadmap items are done except one confirmed dead end (Modeler reads) -
+that's the only item left on this list now.
 Everything below has been verified live against a real running
 LightWave 2019.1.5 session, not just reasoned about from SDK docs -
 this project's docs are demonstrably out of sync with this build in
@@ -24,6 +25,10 @@ real thing.
   live, including a fix for two non-obvious LightWave argument quirks
   (numeric IDs vs. names; `SelectItem` not resolving names reliably for
   Camera/Light).
+- Full item hierarchy including bone chains within an object (bones
+  don't even need a real mesh - they attach directly to a Null via
+  `AddBone`/`AddChildBone`, which made this far cheaper to verify than
+  expected).
 - Render/camera automation, including real completion signaling (not
   guessed timing) confirmed for both single-frame and multi-frame
   renders, and a scriptable `SetRenderDisplay` (a wrapped-method bug
@@ -32,39 +37,35 @@ real thing.
 
 ## What's remaining
 
-Two items left, roughly in order of how likely they are to be worth doing:
+One item left - everything else on the original plan is done.
 
-### 1. Bone chain traversal for `lw_get_hierarchy` - needs a rigged object
-
-`lw_get_hierarchy` currently reports item-level parent/target/goal/pole
-for every Object/Light/Camera, but does not walk bone chains *within*
-an object (`LWItemInfo.first(LWI_BONE, object)` / `next()` is the
-likely mechanism, unconfirmed). No boned object has been available in
-any session so far to test against.
-
-**To proceed:** get (or build in Modeler) an object with a real bone
-setup, load it into Layout, then extend `_get_hierarchy()` in
-`lw_mcp_ring.py` to also traverse `LWI_BONE` for each object. **Treat
-this with real caution, not routine extension** - this project has a
-documented case (`LWChannelInfo`/`nextGroup`, see `PLAN.md`) of an SDK
-traversal call reproducibly crashing Layout entirely, with no Python
-exception and no warning. Test incrementally against a real boned
-object, and be ready to stub it back out (as `_probe_channels` was)
-rather than push through a suspicious result.
-
-### 2. Modeler reads - confirmed dead end, not recommended
+### Modeler reads - confirmed dead end, not recommended
 
 Thoroughly investigated (three independent methods, including against
 NewTek's own bundled sample plug-in) and confirmed blocked: Modeler has
 no `LWComRing`-equivalent, and its network Command Port only reaches
 native/compiled commands, not Python-registered ones. See `PLAN.md`
-"Modeler read path" for the full writeup.
+"Modeler read path" for the full writeup. Independently re-confirmed
+by checking a different, newer LightWave-MCP project (targeting
+LightWave 2025.0.3+) - it hasn't solved this either, and Modeler's
+command surface is byte-for-byte identical between that SDK and this
+project's 2019.1.5 install (same 63 commands, zero additions in 6
+years).
 
 **To proceed, if ever:** only worth retrying given new information -
 a NewTek support answer, or a newer LightWave version's SDK adding a
 Modeler equivalent of `LWComRing`/Master plugins. A real but limited
 substitute already exists: reading saved `.lwo` files directly from
 disk (bypasses Modeler's Python API, only reflects saved state).
+
+Bone chain traversal for `lw_get_hierarchy` - previously the other item
+on this list - is now done. Turned out not to need a rigged object at
+all: `AddBone`/`AddChildBone` attach directly to a Null, no real mesh
+geometry required, which made real live testing far cheaper than
+expected. See ROADMAP.md item 11 / PLAN.md "Bone chain traversal" for
+the full writeup, including how the risk was staged down before any
+real traversal loop was written (given this project's one documented
+SDK-traversal crash, `LWChannelInfo`/`nextGroup`).
 
 ## Working method, if picking this back up
 
@@ -105,3 +106,14 @@ What has reliably worked:
    "could not be added" if that plug-in is currently active somewhere
    (e.g. the current Render Display) - switch away from it first, then
    reload, then switch back.
+5. **Before assuming a real limitation needs a heavy setup to test**,
+   check whether a cheaper path exists - bone chain traversal was
+   framed as needing "get or build a rigged object," but two native
+   commands on a plain Null (`AddBone`/`AddChildBone`) turned out to be
+   enough. And before writing a real loop into risky SDK territory,
+   stage the risk down with a temporary, non-looping probe (checked one
+   step at a time, each wrapped separately) rather than writing the
+   obvious `while` loop and hoping - the bone traversal probe found
+   `LWI_BONE` existed and a single `first()`/`next()` pair was safe
+   *before* any real loop got written, so there was nothing left to
+   discover by the time it did.

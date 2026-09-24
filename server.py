@@ -572,9 +572,14 @@ def lw_get_hierarchy() -> str:
     elsewhere in this connector (lw_get_transform), not the LWChannelInfo
     path that crashed Layout during development (see PLAN.md).
 
-    Does NOT currently walk bone chains within an object (only top-level
-    item parenting) - that's a follow-up once there's a real boned
-    object to verify traversal against safely; see PLAN.md."""
+    Also walks bone chains within each object (STATUS.md's last real
+    open item, now closed) - LWItemInfo.first(LWI_BONE, object)/next(),
+    confirmed live and safe against a real 2-bone chain (unlike
+    LWChannelInfo/nextGroup, which crashed Layout outright - see
+    PLAN.md). Bones don't need a real mesh object to test against:
+    AddBone/AddChildBone attach directly to a Null. Each object's
+    entry gets a "bones" list (only present if non-empty) with the
+    same name/parent/target/goal/pole shape as every other item here."""
     return json.dumps(_query("get_hierarchy"))
 
 

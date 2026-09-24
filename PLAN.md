@@ -924,3 +924,98 @@ session's case 3 days apart, clearly unrelated leftovers rather than
 the same-session duplicate this project's memory previously flagged as
 a concern; worth checking creation timestamps before assuming a stale
 process is the cause of a given symptom.
+
+## Bone chain traversal (STATUS.md item 2, closing item 7's deferred piece)
+
+Goal: extend `lw_get_hierarchy` to walk bone chains within an object,
+deferred since item 7 for lack of a real boned object to verify
+traversal against. This project has a documented, real crash in an
+adjacent SDK traversal area (`LWChannelInfo`/`nextGroup` - see
+"LWChannelInfo crash" above), so this was approached deliberately step
+by step rather than writing the obvious `while` loop and hoping.
+
+**First surprise: no real mesh object was needed at all.** Before
+reaching for Modeler to build a test object, checked whether `AddBone`
+(a native Layout command, `lwcommandport/layout/__init__.py`) works on
+a plain Null. It does: `AddBone("Bone1")` after selecting a fresh Null
+(`BoneTestObject`) created a real bone, visible in Scene Editor nested
+exactly like real parent/child items; `AddChildBone("Bone2")` added a
+second bone chained under the first. This made the whole investigation
+far cheaper than expected - no Modeler mesh-building detour, no
+`.lwo` load, just two native Layout commands already in the wrapped
+command list.
+
+**Staged the actual traversal risk down before writing a real loop.**
+Added a temporary, deliberately non-looping probe (`lw_probe_bones`/
+`_probe_bones`, since removed) that checked, in order, each wrapped in
+its own try/except:
+
+1. Does `lwsdk.LWI_BONE` even exist (`hasattr(lwsdk, "LWI_BONE")`)?
+   STATUS.md had flagged this as "the likely mechanism, unconfirmed."
+2. Does a single `LWItemInfo().first(LWI_BONE, object_id)` call
+   succeed, and is the result non-null?
+3. Does a single `.next(first_bone_id)` call succeed, and is *that*
+   non-null?
+
+Ran this against the real 2-bone chain: all three came back clean -
+`has_LWI_BONE: true`, `first_bone_name: "Bone1"`,
+`second_bone_name: "Bone2"`, no exceptions, no crash. Checked Layout
+was still fully responsive (`lw_ping`, `lw_get_scene_info`) before
+proceeding - unlike `LWChannelInfo`/`nextGroup`, this API behaves like
+the same safe `first()`/`next()` pattern already proven for
+Object/Light/Camera iteration, not the one that crashed Layout
+outright with no Python exception.
+
+**Shipped the real traversal** in `lw_mcp_ring.py` (`_get_bones()`),
+using the identical `while it != LWITEM_NULL` shape already proven for
+the other item categories, plus a generous iteration cap
+(`_MAX_BONES_PER_OBJECT = 200`) as an extra margin against a
+hypothetical malformed/circular chain - not because anything suggested
+one exists, but because a bounded loop costs nothing and this project
+has exactly one precedent for an unbounded SDK traversal call going
+wrong. Each bone reports the same name/parent/target/goal/pole shape as
+every other item, attached to its host object's entry as a `bones`
+list (only when non-empty).
+
+**Confirmed live end to end:** `lw_get_hierarchy()` against the real
+2-bone chain correctly returned `Bone1.parent == "BoneTestObject"`
+(the host item) and `Bone2.parent == "Bone1"` - the actual chain
+relationship, not just "a bone exists." No crash, no exception, on the
+first real attempt at the full (bounded) loop - the staged probing
+beforehand meant there was nothing left to discover by the time the
+real loop got written.
+
+Removed the temporary probe tool and function once this shipped, per
+this project's established pattern (`lw_probe_channels`, `lw_probe_surf`,
+`lw_probe_time` before it).
+
+**Unrelated side investigation, same session:** the user asked whether
+a different, newer LightWave-MCP project (Kartaverse's `lightwave-mcp`,
+targeting LightWave 2025.0.3+, found locally as
+`lightwave-mcp-master-2025`) had solved Modeler reads or had anything
+else worth leveraging. It hadn't, on either count:
+
+- No `LWComRing`/`IMaster`/`FrameBuffer` usage anywhere in the repo,
+  and no companion `.py` file meant to be loaded inside LightWave via
+  Add Plugins at all - it's a pure external client with connection
+  management and command-cache introspection built around fire-and-
+  forget `send_layout_command`/`send_modeler_command` calls, nothing
+  more. It hasn't attempted what this project already solved for
+  Layout reads, let alone Modeler.
+- It still carries both bugs this project found and fixed independently:
+  `Ring()`'s doubled-brace format-string bug (`"{{0}} {1}".format(...)`
+  producing a literal `"{0} message"`), and `SetRenderDisplay(self)`
+  taking zero arguments despite the native command accepting one. Both
+  are apparently genuine, longstanding bugs in NewTek's own bundled SDK
+  sample code, uncaught anywhere else and carried forward unfixed even
+  in the current 2025 distribution.
+- Modeler's command surface (`lwcommandport/modeler/__init__.py`) is
+  byte-for-byte identical between the two forks - same 63 method names,
+  zero additions in 6 years across a major version jump (2019.1.5 to
+  2025.0.3). Real, independent evidence for item 5's Modeler-reads
+  dead-end conclusion, not just this project's own testing.
+
+No further work needed here - `lw_get_hierarchy` now covers item-level
+parenting, IK relationships, AND bone chains, all live-verified.
+STATUS.md's remaining-items list is down to one entry (Modeler reads,
+confirmed dead end).

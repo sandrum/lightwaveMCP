@@ -275,26 +275,64 @@ def _resolve_name(ii, item_id):
         return None
 
 
+_MAX_BONES_PER_OBJECT = 200
+
+
+def _get_bones(ii, object_id):
+    """Walk the bone chain within one object via LWItemInfo.first(
+    LWI_BONE, object)/next() - confirmed live via a temporary probe
+    tool (removed once this shipped) before this loop was written:
+    LWI_BONE exists, and a single first()/next() call pair completed
+    safely against a real 2-bone chain with no crash, unlike the
+    LWChannelInfo/nextGroup path (see PLAN.md) this project has
+    previously confirmed crashes Layout outright with no Python
+    exception. Capped at
+    _MAX_BONES_PER_OBJECT as a safety margin against a hypothetical
+    malformed/circular chain hanging the loop - far more than any real
+    scene should ever have, so it should never actually bind in
+    practice. Each bone reports the same parent/target/goal/pole shape
+    as every other item here, plus which bone (if any, within the same
+    object) it's parented to - a bone's own parent() can point outside
+    the chain (e.g. to the host object) so that's resolved by name
+    like everything else, not assumed to be another bone."""
+    bones = []
+    bone_id = ii.first(lwsdk.LWI_BONE, object_id)
+    count = 0
+    while bone_id != lwsdk.LWITEM_NULL and count < _MAX_BONES_PER_OBJECT:
+        entry = {
+            "name": ii.name(bone_id),
+            "type": "BONE",
+            "parent": _resolve_name(ii, ii.parent(bone_id)),
+        }
+        for key, getter in (("target", ii.target), ("goal", ii.goal), ("pole", ii.pole)):
+            try:
+                entry[key] = _resolve_name(ii, getter(bone_id))
+            except Exception:
+                pass
+        bones.append(entry)
+        bone_id = ii.next(bone_id)
+        count += 1
+    return bones
+
+
 def _get_hierarchy():
     """Parent/child and IK (target/goal/pole) relationships for every
-    object/light/camera. Uses LWItemInfo.parent()/target()/goal()/
-    pole() - confirmed via NewTek's official Python SDK docs (fetched
-    live from static.lightwave3d.com/sdk/2015/python/globaliteminfo.html,
-    since none ship with this install; this is the same LWItemInfo class
-    already proven safe here for _get_transform's param() calls, NOT the
-    LWChannelInfo path that crashed Layout - see PLAN.md). parent()
-    returns an item ID or LWITEM_NULL, so each relationship is resolved
-    to a name via a second LWItemInfo call rather than returned as a raw
-    ID, matching how every other query in this file reports items.
+    object/light/camera, plus bone chains within each object. Uses
+    LWItemInfo.parent()/target()/goal()/pole() - confirmed via NewTek's
+    official Python SDK docs (fetched live from static.lightwave3d.com/
+    sdk/2015/python/globaliteminfo.html, since none ship with this
+    install; this is the same LWItemInfo class already proven safe here
+    for _get_transform's param() calls, NOT the LWChannelInfo path that
+    crashed Layout - see PLAN.md). parent() returns an item ID or
+    LWITEM_NULL, so each relationship is resolved to a name via a
+    second LWItemInfo call rather than returned as a raw ID, matching
+    how every other query in this file reports items.
 
-    Deliberately NOT walking bone chains yet (LWItemInfo.first(LWI_BONE,
-    object) / next() would be needed) - the current live scene has no
-    boned object to test against, and given this project's real history
-    of an unbounded-traversal crash in a different SDK area
-    (LWChannelInfo/nextGroup, see PLAN.md), that's being left for a
-    follow-up increment with a real bone hierarchy to verify against
-    rather than shipped un-tested. Item-level parenting (nulls, objects,
-    lights, cameras) is fully covered here."""
+    Bone chain traversal (see _get_bones) confirmed live against a real
+    2-bone chain on a Null (BoneTestObject/Bone1/Bone2) - bones can be
+    added directly to a Null via AddBone/AddChildBone, no real mesh
+    geometry required, which made this far cheaper to verify than
+    expected."""
     ii = lwsdk.LWItemInfo()
     items = []
     for label, item_type in (
@@ -314,6 +352,10 @@ def _get_hierarchy():
                     entry[key] = _resolve_name(ii, getter(it))
                 except Exception:
                     pass
+            if label == "OBJECT":
+                bones = _get_bones(ii, it)
+                if bones:
+                    entry["bones"] = bones
             items.append(entry)
             it = ii.next(it)
     return {"items": items}

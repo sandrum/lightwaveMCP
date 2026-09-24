@@ -156,8 +156,9 @@ NOT actually reparent items as tested (name-as-argument didn't take);
 the relationship had to be set through the UI to test the read side.
 That was a real gap for anyone wanting to *write* parenting through
 this connector - see item 8 below for the fix. Bone-chain traversal
-(bones within an object) is explicitly out of scope for now - no boned
-object existed yet to verify traversal safely against.
+(bones within an object) was explicitly out of scope at the time - no
+boned object existed yet to verify traversal safely against - see item
+11 below for the eventual fix.
 
 ## 8. Reparenting write path (the item 7 gap) - DONE
 
@@ -311,6 +312,49 @@ With this, STATUS.md's item 1 is closed. Remaining: bone chain
 traversal (needs a rigged object) and the confirmed Modeler-reads dead
 end.
 
+## 11. Bone chain traversal within an object (item 7's deferred piece) - DONE
+
+Closed out with real caution, not routine extension - this project has
+a documented case (`LWChannelInfo`/`nextGroup`, see PLAN.md) of an SDK
+traversal call reproducibly crashing Layout outright, with no Python
+exception. Staged the risk down before writing any real loop: first
+confirmed `LWI_BONE` exists at all (`hasattr(lwsdk, "LWI_BONE")`), then
+a single `first()`/`next()` call pair against a real bone chain via a
+temporary, non-looping probe tool, and only wrote the actual bounded
+`while` loop (matching the same pattern already proven safe for
+Object/Light/Camera, plus a generous iteration cap as an extra margin)
+once that came back clean.
+
+Also found, unplanned: bones don't need a real mesh object to test
+against at all - `AddBone`/`AddChildBone` attach directly to a Null
+(confirmed live: `Bone1`/`Bone2` added to a Null named
+`BoneTestObject`, visible in Scene Editor exactly like real
+parent/child nesting). This made the whole investigation far cheaper
+than the "get or build a rigged object" framing in STATUS.md assumed -
+no Modeler mesh-building detour was needed.
+
+`lw_get_hierarchy` now reports a `bones` list on each object's entry
+(only when non-empty) with the same name/parent/target/goal/pole shape
+as every other item. Confirmed live end to end: `Bone1.parent` ==
+`"BoneTestObject"` (the host), `Bone2.parent` == `"Bone1"` - correctly
+resolved by name, matching the real chain exactly.
+
+Bonus context from an unrelated side investigation this same session:
+checked whether a different, newer LightWave-MCP project (targeting
+LightWave 2025.0.3, found locally as `lightwave-mcp-master-2025`) had
+solved Modeler reads or offered anything else to leverage. It hadn't -
+no read-path mechanism for either Layout or Modeler at all (pure
+fire-and-forget command sending), and it still carries both bugs this
+project found and fixed (`Ring()`'s doubled-brace bug, `SetRenderDisplay`
+missing its argument). Modeler's command surface was also confirmed
+byte-for-byte identical between the 2019.1.5 and 2025.0.3 SDKs - real,
+independent evidence for item 5's dead-end conclusion, not just this
+project's own testing.
+
+With this, every roadmap item is done except item 5 (Modeler reads),
+which remains a documented, confirmed dead end - the only item left on
+STATUS.md's list.
+
 ## Recommended order
 
 1. ~~Layout read queries (selection, camera/light)~~ - done
@@ -323,6 +367,7 @@ end.
 8. ~~Reparenting write path~~ - done
 9. ~~Live playhead time query~~ - done
 10. ~~Multi-frame RenderScene progress tracking~~ - done
+11. ~~Bone chain traversal within an object~~ - done
 
 Rationale: started with the cheapest, lowest-risk extensions of what's
 already proven (1, done), then opened the next major surface using a
@@ -352,5 +397,10 @@ the process (a wrong assumption about which callback fires per frame,
 and a counter that didn't reset across renders) - proof that "probably
 fine, just untested" items in this project keep turning out to have
 real substance once actually checked, not just a formality to confirm.
-With this, every roadmap item is done except item 5 (Modeler reads),
-which remains a documented, confirmed dead end.
+Item 11 closed the last real open item on STATUS.md's list by staging
+the risk down in cautious, verifiable steps rather than writing the
+real traversal loop on faith - exactly the discipline this project's
+one genuine crash (`LWChannelInfo`/`nextGroup`) should have taught from
+the start. With this, every roadmap item is done except item 5
+(Modeler reads), which remains a documented, confirmed dead end.
+

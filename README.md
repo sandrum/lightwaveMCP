@@ -34,8 +34,11 @@ and what's explicitly out of scope.
   glossiness, reflection, transparency, smoothing via `LWSurfaceFuncs`.
 - `lw_get_hierarchy` - every item's parent, plus IK target/goal/pole,
   by name. Useful before rigging on top of something already parented.
-  Does **not** walk bone chains within an object yet (no boned object
-  has been available to verify that traversal safely against).
+  **Now also walks bone chains within each object** (`LWItemInfo.first(
+  LWI_BONE, object)`/`next()`) - confirmed live and safe against a real
+  2-bone chain, unlike `LWChannelInfo`/`nextGroup`, which crashed
+  Layout outright (see `PLAN.md`). Bones don't need a real mesh object
+  to test against - `AddBone`/`AddChildBone` attach directly to a Null.
 - `lw_get_current_time` - the live playhead's frame and time (seconds).
 
   **Formerly a known limitation, now solved:** camera/light/transform
