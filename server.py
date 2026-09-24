@@ -404,21 +404,47 @@ def lw_abort_render() -> str:
 @mcp.tool()
 def lw_get_render_status() -> str:
     """Get the live render state - whether a render is in progress, the
-    resolution, and a frame_count that increments each time the render
-    engine opens a new frame buffer (see lw_mcp_render_monitor.py).
+    resolution, and a frame_count (see lw_mcp_render_monitor.py).
     Solves the actual problem in ROADMAP.md item 6: lw_render_frame/
     lw_render_scene are one-way fire-and-forget commands with no
-    built-in completion signal, so this reads real callback-driven state
-    (IFrameBuffer.open()/close()) over the LWComRing read path instead
-    of guessing based on elapsed time.
+    built-in completion signal, so this reads real callback-driven
+    state over the LWComRing read path instead of guessing based on
+    elapsed time.
+
+    Multi-frame lw_render_scene progress tracking confirmed live and
+    working: frame_count correctly climbs across a multi-frame render
+    rather than jumping straight to done or stalling (not once per
+    whole render session - open()/close() fire only once for the
+    entire sequence; the real per-frame signal is IFrameBuffer.begin(),
+    found via NewTek's own bundled sample plug-in after this project's
+    own code had never overridden it). One real subtlety: begin() fires
+    once per ENABLED RENDER BUFFER per frame (Render Properties >
+    Buffers), not once per frame alone - confirmed live with
+    Final_Render+Alpha both enabled (frame_count reached 8 for a
+    4-frame render) vs. Final_Render alone (a clean 4). Divide
+    frame_count by the number of enabled Render-column buffers if an
+    exact frame count matters for a given scene. Also fixed a real bug
+    in the same investigation: frame_count was continuing to climb
+    across separate lw_render_scene calls within one Layout session
+    instead of resetting - now resets on each new render.
 
     Requires a ONE-TIME manual setup step beyond the usual Add Plugins +
     Master Plugins dance: lw_mcp_render_monitor.py must additionally be
     selected as the active Render Display (Render Globals > Render
-    Display tab) - LightWave has no networked way to select it, per
-    lw_mcp_render_monitor.py's docstring. Before that's done, or before
-    any render has been triggered this session, rendering will be null,
-    not a real in-progress/done state."""
+    Display tab). This can now also be done over the network via
+    lw_run_command("SetRenderDisplay", ["LW MCP Render Monitor"]) -
+    contrary to this tool's own earlier assumption, the native command
+    does take an argument (confirmed via Cmd History showing a real
+    "SetRenderDisplay LW MCP Render Monitor" entry); the wrapped
+    lwcommandport method was just missing it (fixed). Before the
+    display is set, or before any render has been triggered this
+    session, rendering will be null, not a real in-progress/done state.
+    Also: the Render Display dropdown selection appears to persist as a
+    UI preference across sessions even though the underlying plug-in
+    class needs re-loading via Add Plugins each fresh session, AND that
+    reload can lock if the plugin is currently the active display -
+    switch the display away first (e.g. to "Image Viewer"), reload,
+    then switch back."""
     return json.dumps(_query("get_render_status"))
 
 

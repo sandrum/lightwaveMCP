@@ -32,11 +32,43 @@ _mcp_render_status.json on open()/close(). lw_mcp_ring.py's
 already-proven LWComRing read path, so no second polling mechanism is
 needed on the client side beyond what lw_ping/_query already do.
 
-OPEN QUESTION (see PLAN.md for what live testing finds): whether
-open()/close() fire once per whole render session or once per frame
-within a multi-frame RenderScene animation isn't precisely documented.
-frame_count below increments on every open() so either behavior is
-observable and distinguishable live rather than assumed.
+RESOLVED (see PLAN.md "Multi-frame RenderScene progress tracking" for
+the full investigation): open()/close() fire ONCE per whole render
+session, not once per frame - confirmed live via a 4-frame RenderScene
+producing exactly one open()/close() pair. The real per-frame(-ish)
+signal is begin() (resets the scanline counter to 0 before write()
+calls) - not previously implemented here, found by reading NewTek's
+own bundled sample (support/plugins/scripts/Python/Layout/FrameBuffer/
+framebuffer.py), which overrides it but this file originally didn't.
+pause(display_name) does fire during automatic/batch RenderScene
+rendering too (disproving this docstring's original assumption that it
+was F9-only), alternating 'Alpha'/None - not used for frame_count.
+
+IMPORTANT CORRECTION to an earlier version of this note: begin() is
+NOT a clean scene-independent per-frame signal - it fires once per
+ENABLED RENDER BUFFER per frame (confirmed live: Render Properties >
+Buffers > Final_Render + Alpha both checked produced 8 begin() calls
+for a 4-frame render; Final_Render alone produced a clean 4). See
+begin()'s own docstring below. Also fixed a real bug found in the same
+investigation: the plugin instance persists across separate
+RenderScene calls within one Layout session, so frame_count was
+continuing to climb across renders instead of resetting - now reset in
+open(), not just __init__.
+
+Bonus finding from the same investigation, unrelated to frame_count:
+SetRenderDisplay DOES take an argument over the network
+(SetRenderDisplay(display_name), e.g. "LW MCP Render Monitor") despite
+this file's setup notes below (and lw_get_render_status's docstring)
+originally claiming there was no networked way to select the active
+Render Display - found via Cmd History showing a real
+"SetRenderDisplay LW MCP Render Monitor" entry. The wrapped
+lwcommandport method was simply missing its argument (fixed in
+lwcommandport/layout/__init__.py, same class of bug as the Ring() fix
+in lwcommandport/__init__.py). The one-time-per-session UI step below
+is no longer strictly required if scripting the initial selection is
+useful - though switching away and back is still sometimes needed to
+force a fresh bind, the same activation flakiness this project's Master
+Plugins already exhibit.
 
 SETUP (once per fresh Layout session):
   1. Utilities > Plugins > Add Plugins > lw_mcp_render_monitor.py
@@ -86,12 +118,21 @@ class mcp_render_monitor(lwsdk.IFrameBuffer):
     def __init__(self, context):
         super(mcp_render_monitor, self).__init__()
         self._frame_count = 0
+        self._width = None
+        self._height = None
         _log("mcp_render_monitor instantiated, context=%r" % (context,))
 
     # LWFrameBuffer -------------------------------------------------------
     def open(self, width, height):
-        self._frame_count += 1
-        _log("open: width=%d height=%d frame_count=%d" % (width, height, self._frame_count))
+        # Fixes a real bug found live: the same plugin instance persists
+        # across separate RenderScene invocations within one Layout
+        # session (confirmed: a second render's begin() count continued
+        # from the first's total instead of starting fresh), so
+        # frame_count must reset here, not just in __init__.
+        self._frame_count = 0
+        self._width = width
+        self._height = height
+        _log("open: width=%d height=%d" % (width, height))
         _write_status({
             "rendering": True,
             "width": width,
@@ -100,9 +141,29 @@ class mcp_render_monitor(lwsdk.IFrameBuffer):
         })
         return None
 
+    def begin(self):
+        # The real per-frame*buffer boundary signal - see this file's
+        # module docstring. Not previously overridden here at all.
+        # NOTE: fires once per ENABLED RENDER BUFFER per frame, not once
+        # per frame alone - confirmed live with Render Properties >
+        # Buffers > Final_Render + Alpha both enabled (8 begin() calls
+        # for a 4-frame render) vs. Final_Render alone (a clean 4).
+        # frame_count is therefore frame_count-times-enabled-buffers in
+        # scenes with more than one Render-column buffer checked, not a
+        # literal frame count - divide by the number of enabled buffers
+        # if an exact frame count matters for a given scene.
+        self._frame_count += 1
+        _log("begin: frame_count=%d" % self._frame_count)
+        _write_status({
+            "rendering": True,
+            "width": self._width,
+            "height": self._height,
+            "frame_count": self._frame_count,
+        })
+
     def write(self, r, g, b, a):
         # Intentionally ignoring pixel data - we only care about the
-        # open/close lifecycle as a completion signal.
+        # begin/close lifecycle as a completion signal.
         return None
 
     def close(self):

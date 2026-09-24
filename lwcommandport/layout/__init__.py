@@ -1800,9 +1800,9 @@ class Layout(CommandPort):
     def AbortRender(self):
         """ AbortRender() """
         self._send_command("AbortRender")
-    def SetRenderDisplay(self):
-        """ SetRenderDisplay() """
-        self._send_command("SetRenderDisplay")
+    def SetRenderDisplay(self, *args):
+        """ SetRenderDisplay(display_name) """
+        self._send_command("SetRenderDisplay", args)
     def RenderDisplayOptions(self):
         """ RenderDisplayOptions() """
         self._send_command("RenderDisplayOptions")

@@ -827,3 +827,100 @@ setup step 1 redone, not just step 2.
 
 With this, every roadmap item is done except item 5 (Modeler reads),
 which remains a documented, confirmed dead end.
+
+## Multi-frame RenderScene progress tracking (STATUS.md item 1, closing the ROADMAP.md item 6 "untested" note)
+
+Goal: verify whether `frame_count` correctly increments across a
+multi-frame `lw_render_scene()` render, or jumps straight to done, or
+stalls - flagged as untested since ROADMAP.md item 6 shipped. Involved
+real environment trouble across several sessions (a full computer
+restart mid-investigation, a stale two-python-process situation, and a
+genuinely locked plug-in file) on top of the actual technical
+questions - worth recording the process, not just the final answer.
+
+**Setup friction before any real testing could start:** `FirstFrame(0)`/
+`LastFrame(3)` (confirmed via `lwcommandport`, these are the real
+Start/End Frame globals, not `GoToFrame` or the Preview range fields)
+set the range correctly and were confirmed live via a screenshot of
+Render Properties. But `lw_render_scene()` produced no observable
+effect at all the first two attempts - traced to two different real
+causes, not flakiness: (1) LightWave pops a blocking confirmation
+dialog ("Do you want to set the render end frame to the slider end
+frame (120)?") whenever `RenderScene` runs with `Range Type: Single`
+and the configured End Frame differs from the timeline's end - a
+one-way UDP command can't dismiss this, so the render never proceeds
+until a human clicks it; (2) a second dialog ("Auto Frame Advance is
+on. Turn off render display?") follows immediately after. Both need
+"No" to proceed with the render display we want active.
+
+**Root cause misdirected the first real investigation round:** with
+those dialogs cleared, a render finished but `_mcp_render_status.json`
+never updated - looked exactly like the Master Plugin activation
+flakiness this project already has a documented fix for (remove/re-add
+via Add Plugins, usually 1-3 tries). It wasn't. The Render Display
+dropdown can keep showing "LW MCP Render Monitor" as a leftover UI
+preference across a fresh Layout session even when the underlying
+plug-in class was never reloaded - the debug log staying frozen for
+days (`_mcp_render_debug.log`'s mtime) was the tell, not any error
+message. Confirmed by explicitly switching the Render Display away and
+back, which produced fresh log activity immediately.
+
+**Once real data started coming in**, the actual technical question got
+answered fast: `open()`/`close()` fire exactly once for the whole
+`RenderScene` sequence (one open/close pair logged for a 4-frame
+render), not once per frame as `lw_mcp_render_monitor.py`'s original
+`frame_count` logic assumed (it incremented on `open()`). The real
+per-frame signal, found by reading NewTek's own bundled sample plug-in
+(`support/plugins/scripts/Python/Layout/FrameBuffer/framebuffer.py`,
+which this project had not previously looked at for this file): a
+`begin()` method, never overridden here, that the sample uses to reset
+its scanline counter before each frame's `write()` calls.
+
+**First fix attempt was incomplete, caught by testing rather than
+assumed correct:** moved the increment to `begin()` and expected a
+clean `frame_count` of 4 for a 4-frame render. Got 8. Checked Cmd
+History's log of `pause()` calls (`'Alpha'`/`None` alternating,
+matching `begin()`'s own call count exactly) and the Render Properties
+Buffers tab: `Final_Render` and `Alpha` were both checked in the
+"Render" column. Confirmed directly: `begin()` fires once per *enabled
+render buffer* per frame, not once per frame alone - unchecking
+`Alpha` (leaving only `Final_Render`) produced a clean sequence of
+exactly 4 `begin()` calls, matching the 4-frame range exactly. A second
+real bug surfaced in the same round: the plugin instance persists
+across separate `lw_render_scene()` calls within one Layout session, so
+`frame_count` was continuing to climb across renders (the immediately
+following test read `12`, continuing from the prior render's `8`)
+instead of resetting - fixed by resetting `self._frame_count = 0` in
+`open()`, not just `__init__()`. Re-tested after both fixes: a fresh
+4-frame render with only `Final_Render` enabled produced exactly
+`frame_count: 4`, correctly reset from the previous session's `12`.
+
+**Unplanned bonus finding, from reading Cmd History while debugging the
+above:** `SetRenderDisplay` DOES take an argument over the network
+(`SetRenderDisplay LW MCP Render Monitor`, confirmed via a real Cmd
+History entry from manually switching displays) - contradicting this
+project's own earlier documented conclusion (this file, "Render/camera
+automation" section above) that there was no networked way to select
+the active Render Display. The wrapped `lwcommandport` method was
+simply generated without an argument (`def SetRenderDisplay(self):`),
+the same class of bug as the `Ring()` fix in
+`lwcommandport/__init__.py`. Fixed the same way. Also discovered: this
+reload can get "locked" (Add Plugins reports it can't be added) if the
+plug-in is currently the active Render Display - switching the display
+away first, reloading, then switching back resolves it, an addition to
+this project's list of known plug-in-reload quirks.
+
+**Separately, environment trouble unrelated to the actual investigation:**
+a full computer restart mid-session required redoing all three setup
+steps from scratch (Command Port, Ring listener, render monitor) -
+including hitting the exact "Plugins were not found or could not be
+added" message for `lw_mcp_ring.py` despite it still showing (stale) in
+the Master Plugins list from before the restart, resolved by the
+existing uncheck/recheck toggle workaround, not a new issue. Two
+`server.py` processes were also observed running simultaneously more
+than once across this project's history (visible via
+`Get-CimInstance Win32_Process -Filter "Name='python.exe'"`) - in this
+session's case 3 days apart, clearly unrelated leftovers rather than
+the same-session duplicate this project's memory previously flagged as
+a concern; worth checking creation timestamps before assuming a stale
+process is the cause of a given symptom.

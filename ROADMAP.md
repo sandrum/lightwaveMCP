@@ -133,12 +133,15 @@ guessing after firing a one-way render command, built on
 found via NewTek's official docs, not live probing), which gets real
 open()/close() callbacks from the render engine itself. Requires a
 one-time manual step to select the plug-in as the active Render Display
-(no networked way to do this - confirmed via the local command list).
-Live-verified twice: once by hand via lw_run_command before the tools
-were loaded, once fully through the new tools (set resolution to
-640x360, triggered a render, watched rendering go true -> false with
-matching resolution/frame_count). See PLAN.md for the full writeup.
-Not yet tested: multi-frame RenderScene progress tracking.
+(also now scriptable - see STATUS.md item 1's fix below; the "no
+networked way to do this" claim here turned out to be based on a
+wrapped-method bug, not a real limitation). Live-verified twice: once
+by hand via lw_run_command before the tools were loaded, once fully
+through the new tools (set resolution to 640x360, triggered a render,
+watched rendering go true -> false with matching resolution/
+frame_count). See PLAN.md for the full writeup.
+
+**Multi-frame RenderScene progress tracking - now tested, see below.**
 
 ## 7. Item hierarchy query (parent/target/goal/pole) - DONE
 
@@ -272,6 +275,42 @@ that before checking the title bar for `(CP: 9735)` and noticing it
 was missing. Worth checking that first next time symptoms look like
 the known flakiness but persist past 2-3 retries.
 
+## 10. Multi-frame RenderScene progress tracking (STATUS.md item 1) - DONE
+
+Confirmed live and working, with two real bugs found and fixed along
+the way. `frame_count` does correctly climb across a multi-frame
+`lw_render_scene()` render rather than jumping straight to done or
+stalling - the original open question from item 6. Two corrections to
+`lw_mcp_render_monitor.py`'s original assumptions, both found live:
+
+1. `open()`/`close()` fire once for the WHOLE render session, not once
+   per frame (item 6's `frame_count` logic had assumed the latter). The
+   real per-frame signal is `IFrameBuffer.begin()`, found by reading
+   NewTek's own bundled sample plug-in - not previously overridden in
+   this project's code at all.
+2. `begin()` itself fires once per **enabled render buffer** per
+   frame (Render Properties > Buffers), not once per frame alone -
+   confirmed live: `Final_Render`+`Alpha` both enabled produced 8
+   `begin()` calls for a 4-frame render; `Final_Render` alone produced
+   a clean 4. Also fixed: `frame_count` was continuing to climb across
+   separate renders within one Layout session instead of resetting.
+
+Bonus, unrelated finding from the same investigation: `SetRenderDisplay`
+turns out to be scriptable after all
+(`lw_run_command("SetRenderDisplay", ["LW MCP Render Monitor"])`) -
+this project's own item 6 write-up had concluded there was no networked
+way to do this, based on a wrapped `lwcommandport` method missing its
+argument (fixed, same class of bug as the `Ring()` fix). See PLAN.md
+"Multi-frame RenderScene progress tracking" for the full investigation,
+including real environment trouble (a mid-session computer restart, a
+locked plug-in file, a red herring that looked exactly like the
+documented Master Plugin flakiness but wasn't) that took as much
+effort as the actual technical question.
+
+With this, STATUS.md's item 1 is closed. Remaining: bone chain
+traversal (needs a rigged object) and the confirmed Modeler-reads dead
+end.
+
 ## Recommended order
 
 1. ~~Layout read queries (selection, camera/light)~~ - done
@@ -283,6 +322,7 @@ the known flakiness but persist past 2-3 retries.
 7. ~~Item hierarchy query~~ - done
 8. ~~Reparenting write path~~ - done
 9. ~~Live playhead time query~~ - done
+10. ~~Multi-frame RenderScene progress tracking~~ - done
 
 Rationale: started with the cheapest, lowest-risk extensions of what's
 already proven (1, done), then opened the next major surface using a
@@ -306,6 +346,11 @@ failed attempts logged - revealed the real root cause in one step.
 Item 9 closed out the oldest open limitation in the whole project
 (carried since item 1) by fixing the original introspection's real
 gap - it simply never searched for the right keywords - rather than
-concluding the SDK lacked the capability. With this, every roadmap
-item is done except item 5 (Modeler reads), which remains a
-documented, confirmed dead end.
+concluding the SDK lacked the capability. Item 10 answered a
+long-standing "untested" note from item 6 and found two real bugs in
+the process (a wrong assumption about which callback fires per frame,
+and a counter that didn't reset across renders) - proof that "probably
+fine, just untested" items in this project keep turning out to have
+real substance once actually checked, not just a formality to confirm.
+With this, every roadmap item is done except item 5 (Modeler reads),
+which remains a documented, confirmed dead end.

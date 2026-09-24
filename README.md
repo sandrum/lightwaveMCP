@@ -57,7 +57,20 @@ and what's explicitly out of scope.
   read from `lwsdk.IFrameBuffer` callbacks (see Setup step 3), not a
   guess based on elapsed time. Confirmed live: resolution set, render
   triggered, status correctly went `true` -> `false` with matching
-  numbers. Multi-frame `RenderScene` progress tracking is untested.
+  numbers. **Multi-frame `RenderScene` progress tracking is now
+  confirmed live too** - `frame_count` correctly climbs across a
+  multi-frame render rather than stalling or jumping straight to done.
+  One real subtlety found along the way: the real per-frame signal is
+  `IFrameBuffer.begin()` (`open()`/`close()` only fire once for the
+  whole render session), and `begin()` fires once per **enabled render
+  buffer** per frame (Render Properties > Buffers), not once per frame
+  alone - divide `frame_count` by the number of enabled buffers if an
+  exact frame count matters. Also fixed a real bug: the counter was
+  continuing to climb across separate renders in the same session
+  instead of resetting. See `PLAN.md` for the full investigation.
+  Bonus: `SetRenderDisplay` turns out to be scriptable after all
+  (`lw_run_command("SetRenderDisplay", ["LW MCP Render Monitor"])`) -
+  a wrapped-method bug, not a real LightWave limitation.
 
 **Modeler**
 - `modeler_run_command` - same pattern as `lw_run_command` but for
@@ -121,11 +134,20 @@ friction, not a bug.
 **3. Enable render completion signaling (once per Layout session,
 optional - only needed for `lw_get_render_status`)**
 
-Utilities → Plugins → Add Plugins → select `lw_mcp_render_monitor.py`.
-Then Render → Render Properties → General tab → "Render Display"
-dropdown → select "LW MCP Render Monitor". Unlike Master Plugins, this
-only needs to be selected once - LightWave has no networked way to pick
-the active Render Display, so this step can't be automated.
+Utilities → Plugins → Add Plugins → select `lw_mcp_render_monitor.py`
+(needs re-adding each fresh Layout session, same as `lw_mcp_ring.py` -
+the Render Display dropdown can visually keep showing "LW MCP Render
+Monitor" as a leftover preference even when the underlying plug-in
+class isn't actually loaded this session, which looks like it worked
+but silently doesn't). Then Render → Render Properties → General tab →
+"Render Display" dropdown → select "LW MCP Render Monitor" - or script
+it: `lw_run_command("SetRenderDisplay", ["LW MCP Render Monitor"])`
+(this command does take an argument over the network; an earlier
+version of this doc claimed it didn't, based on a wrapped-method bug
+now fixed). If Add Plugins reports the plug-in can't be added/is
+locked, it's because it's currently the active Render Display - switch
+the display away first (e.g. to "Image Viewer"), reload, then switch
+back.
 
 **4. Enable Modeler's Command Port (once per Modeler session, optional -
 only needed for `modeler_run_command`)**
