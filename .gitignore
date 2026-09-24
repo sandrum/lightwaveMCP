@@ -10,9 +10,3 @@ _mcp_response.json
 _mcp_ring_debug.log
 _mcp_render_status.json
 _mcp_render_debug.log
-
-# A different team's LightWave-MCP project (targeting LightWave
-# 2025.0.3+), downloaded locally for research/comparison purposes only
-# - see PLAN.md "Bone chain traversal" for what was learned from it.
-# Not part of this project, never meant to be committed here.
-lightwave-mcp-master-2025/
