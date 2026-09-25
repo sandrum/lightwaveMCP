@@ -1072,3 +1072,49 @@ further since it didn't block anything.
 No further work needed here - all four tools confirmed live and
 symmetric. `ROADMAP2.md` item 1 is closed; item 2 (loading real
 geometry via `LoadObject`) is next.
+
+## Load real geometry into Layout (ROADMAP2.md item 2)
+
+Goal: close the biggest capability gap identified in `ROADMAP2.md` -
+this connector could create Nulls (`AddNull`) but had no way to bring
+real mesh geometry into a Layout scene without a separate Modeler
+round-trip. `LoadObject(filename)` was found unused during the same
+command-list survey that grounded the whole of `ROADMAP2.md`.
+
+Needed a real `.lwo` file to test against. Rather than build one via
+Modeler (previously confirmed to have no simple scriptable primitive
+command - see "ParentItem argument format"'s sibling investigations
+and ROADMAP2.md item 2's own framing), checked the LightWave install
+itself first: `support/genoma/rigs/` ships real `.lwo` rig-part files
+as part of the bundled Genoma auto-rigging system. Picked the smallest
+one available (`connector_01.lwo`, 622 bytes, under `Rig Parts/
+01_Connectors/`) purely to keep the test object simple, not for any
+functional reason.
+
+Shipped `lw_load_object(filename)`, a thin wrapper around
+`LoadObject` following the same one-way fire-and-forget pattern as
+every other write in this connector. Confirmed live end to end, not
+just that the command was sent:
+
+- `lw_get_scene_info()` before: `["BoneTestObject", "Light", "Camera"]`.
+  After `lw_load_object(<connector_01.lwo path>)`:
+  `["BoneTestObject", "connector_01", "Light", "Camera"]` - the loaded
+  object's name (derived from the file, not something we specified)
+  appearing confirms LightWave actually parsed and loaded the file,
+  not just accepted the command.
+- `lw_get_transform("connector_01")` returned a valid position/
+  rotation/scale, proving it's a real, queryable item like any other,
+  not a broken reference.
+- A screenshot showed real triangular mesh geometry in the viewport -
+  visual, not just data-level, confirmation. Object Properties panel
+  also independently confirmed "Objects in Scene: 2."
+
+Not tested: relative paths, paths outside the LightWave process's
+obvious reach (network shares, paths with unusual characters), or
+loading multiple objects/layers via `LoadObjectLayer`. `filename` is
+documented as needing to be an absolute path readable by the LightWave
+process based on this one successful test, not verified against
+failure modes.
+
+No further work needed for the basic case - `lw_load_object` works.
+`ROADMAP2.md` item 2 is closed; item 3 (scene file I/O) is next.

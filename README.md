@@ -12,6 +12,16 @@ and what's explicitly out of scope.
 
 **Layout writes**
 - `lw_create_null` - sends `AddNull`, confirmed to create a real item.
+- `lw_load_object(filename)` (ROADMAP2.md item 2) - loads a real mesh
+  object (`.lwo`) into the scene via the native `LoadObject` command,
+  closing this connector's biggest capability gap up to this point:
+  previously only Nulls could be created directly in Layout, and real
+  geometry needed a separate Modeler round-trip. Confirmed live:
+  loading a small rig-part `.lwo` produced real triangle geometry
+  visible in the viewport and a working item (`connector_01` appeared
+  in `lw_get_scene_info`, `lw_get_transform` returned a valid
+  position). `filename` must be an absolute path readable by the
+  LightWave process.
 - `lw_run_command` - generic passthrough to any of the ~800 native
   commands in `lwcommandport/layout/__init__.py`. One-way, no
   confirmation LightWave accepted it, just that it was sent.

@@ -179,6 +179,24 @@ def lw_create_null(name: str = "MCP_Null") -> str:
 
 
 @mcp.tool()
+def lw_load_object(filename: str) -> str:
+    """Load a real mesh object (.lwo file) into the current LightWave
+    scene - ROADMAP2.md item 2, closing this connector's biggest
+    remaining capability gap (previously only Nulls could be created
+    directly in Layout; real geometry needed a separate Modeler
+    round-trip). Wraps the native LoadObject(filename) command -
+    filename must be an absolute path LightWave's process can read
+    (this is a one-way fire-and-forget send like every other write
+    here, so there is no confirmation the file was found or loaded
+    successfully beyond checking lw_get_scene_info afterward)."""
+    try:
+        _layout().LoadObject(filename)
+        return json.dumps({"result": "sent LoadObject %s" % filename})
+    except Exception as exc:  # noqa: BLE001
+        return json.dumps({"error": str(exc)})
+
+
+@mcp.tool()
 def lw_set_keyframe(name: str, frame: int, position: list = None, rotation: list = None, scale: list = None) -> str:
     """Create a keyframe for an item at a given frame, optionally setting
     its position/rotation/scale first. Wraps the common by-hand animation

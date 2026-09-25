@@ -39,13 +39,20 @@ documented crash (`LWChannelInfo`/`nextGroup`).
    happened to agree once. See `PLAN.md` "Light/object visibility
    linking" for the full writeup.
 
-2. **Load real geometry into Layout** - `LoadObject(filename)` exists
-   and is unused. Right now this connector can only create Nulls;
-   there's no way to bring real mesh content into a scene without a
-   separate Modeler round-trip. This is the single biggest capability
-   gap in "control as many facets of Layout as possible," and unlocks
-   more meaningful testing for several items below (surfaces,
-   visibility, etc. on real geometry instead of empty Nulls).
+2. **Load real geometry into Layout - DONE.** Shipped `lw_load_object`,
+   wrapping the previously-unused `LoadObject(filename)` command.
+   Confirmed live end to end: loaded a small rig-part `.lwo`
+   (`connector_01.lwo`, from LightWave's own bundled Genoma content) -
+   `lw_get_scene_info` showed the new item by name, `lw_get_transform`
+   returned a valid position, and a screenshot confirmed real triangle
+   geometry visible in the viewport, not just a placeholder entry.
+   `filename` must be an absolute path readable by the LightWave
+   process - no relative-path or content-directory resolution was
+   tested. This was the single biggest capability gap in "control as
+   many facets of Layout as possible" up to this point - previously
+   only Nulls could be created directly, and real geometry needed a
+   separate Modeler round-trip. See `PLAN.md` "Load real geometry into
+   Layout" for the full writeup.
 
 3. **Scene file I/O** - `SaveScene`, `LoadScene`, `ClearScene`,
    `SaveObject`, `SaveAllObjects` all exist and are unused. Natural
