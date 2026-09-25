@@ -1019,3 +1019,56 @@ No further work needed here - `lw_get_hierarchy` now covers item-level
 parenting, IK relationships, AND bone chains, all live-verified.
 STATUS.md's remaining-items list is down to one entry (Modeler reads,
 confirmed dead end).
+
+## Light/object visibility linking (ROADMAP2.md item 1)
+
+Goal: wrap `IncludeObject`/`ExcludeObject`/`IncludeLight`/
+`ExcludeLight` - found unused during the survey of
+`lwcommandport/layout/__init__.py` that grounded `ROADMAP2.md`. All
+four share the identical `(itemid)` docstring convention already known
+to be unreliable for `ParentItem`/`TargetItem`/`GoalItem`/`PoleItem`
+(see "ParentItem argument format" above) - name strings silently
+no-op, and `SelectItem(name)` itself isn't reliable for Camera/Light
+(see "Second finding"). Wrapped with the same `_set_reference_item`
+helper unconditionally rather than testing whether the old assumption
+would happen to hold here too.
+
+Shipped `lw_include_light(light, obj)`, `lw_exclude_light(light, obj)`,
+`lw_include_object_light(obj, light)`, `lw_exclude_object_light(obj,
+light)`. Confirmed live end to end, via the actual UI panels rather
+than just trusting Cmd History's logged IDs:
+
+1. `lw_include_light("Light", "BoneTestObject")` -> Cmd History showed
+   `SelectItem 20000000` / `IncludeObject 10000000` (correctly resolved
+   IDs). Screenshot of Light Properties > Objects tab confirmed
+   `BoneTestObject` listed with the "Exclude" checkbox unchecked - i.e.
+   genuinely in Include mode, not just "some entry appeared."
+2. `lw_exclude_object_light("BoneTestObject", "Light")` - the same
+   relationship, set from the *other* item's side via the *other*
+   native command (`ExcludeLight` instead of `ExcludeObject`).
+   Confirmed two things at once: (a) toggling Include -> Exclude
+   updates the same list entry's checkbox rather than creating a
+   duplicate row, and (b) the relationship really is shared, bare data,
+   not two independent lists that happened to look similar - after
+   this call, BOTH the light's own Properties > Objects tab AND the
+   object's own Item Properties > Lights tab (opened via the native
+   `ItemProperties` command, initially thought not to exist based on a
+   quick look but it does, under its own "Lights" tab) showed the
+   "Exclude" checkbox checked for each other.
+
+One incidental observation, not investigated further since nothing
+broke: `ItemProperties` on a fresh Object (as opposed to a Null that
+already existed in a scene from a `.lws` load) triggered `Cmd History`
+entries for `ApplyServer PixelFilterHandler FiberFilter` and
+`ApplyServer MasterHandler FiberFX`, and "FiberFX" appeared as a new
+entry in the Master Plugins list - LightWave auto-registering a bundled
+hair/fur rendering handler the first time an Object Properties panel
+opens for real geometry, apparently unrelated to the light-linking
+being tested. Layout remained fully responsive throughout (confirmed
+via continued Cmd History activity and successful subsequent commands)
+- worth knowing this happens, not treating it as a bug, but not chased
+further since it didn't block anything.
+
+No further work needed here - all four tools confirmed live and
+symmetric. `ROADMAP2.md` item 1 is closed; item 2 (loading real
+geometry via `LoadObject`) is next.

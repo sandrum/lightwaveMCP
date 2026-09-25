@@ -558,6 +558,56 @@ def lw_set_pole(item: str, pole: str) -> str:
     return _set_reference_item("PoleItem", item, pole)
 
 
+@mcp.tool()
+def lw_include_light(light: str, obj: str) -> str:
+    """Add an object to a light's inclusion list (Light Properties >
+    Objects tab, "Include" mode - unchecked "Exclude" column) - the
+    light will only illuminate objects on this list once that mode is
+    set. ROADMAP2.md item 1. Same numeric-ID-for-both-arguments fix as
+    lw_set_parent/lw_set_target - confirmed live this generalizes
+    cleanly to this command pair too (Cmd History showed the correctly
+    resolved numeric IDs, e.g. "IncludeObject 10000000", not a raw
+    name). Confirmed live end to end via the actual UI panel, not just
+    the command log. The same relationship is also visible, and
+    settable, from the object's own side - see lw_include_object_light -
+    via its Item Properties > Lights tab (opened with the native
+    ItemProperties command); both panels stay in sync since it's the
+    same underlying data, not two separate lists."""
+    return _set_reference_item("IncludeObject", light, obj)
+
+
+@mcp.tool()
+def lw_exclude_light(light: str, obj: str) -> str:
+    """Add an object to a light's exclusion list (Light Properties >
+    Objects tab, "Exclude" mode - checked "Exclude" column) - the light
+    will illuminate every object except those on this list once that
+    mode is set. Same fix as lw_include_light. Confirmed live: toggling
+    an object from Include to Exclude (or vice versa) correctly updates
+    the same list entry's checkbox rather than creating a duplicate."""
+    return _set_reference_item("ExcludeObject", light, obj)
+
+
+@mcp.tool()
+def lw_include_object_light(obj: str, light: str) -> str:
+    """Add a light to an object's inclusion list - the same
+    relationship as lw_include_light, set from the object's side via
+    the native IncludeLight command instead of IncludeObject. Confirmed
+    live: visible on the object's own Item Properties > Lights tab
+    (open via the native ItemProperties command with the object
+    selected), which stays in sync with the light's own Objects tab -
+    the same underlying data either way, not two separate lists."""
+    return _set_reference_item("IncludeLight", obj, light)
+
+
+@mcp.tool()
+def lw_exclude_object_light(obj: str, light: str) -> str:
+    """Add a light to an object's exclusion list - the ExcludeLight
+    counterpart to lw_include_object_light, same relationship as
+    lw_exclude_light set from the object's side. Confirmed live: after
+    calling this, both the object's own Item Properties > Lights tab
+    AND the light's own Properties > Objects tab correctly showed the
+    "Exclude" checkbox checked for each other."""
+    return _set_reference_item("ExcludeLight", obj, light)
 
 
 @mcp.tool()

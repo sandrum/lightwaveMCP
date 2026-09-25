@@ -20,11 +20,24 @@ documented crash (`LWChannelInfo`/`nextGroup`).
 
 ## Priority order
 
-1. **Item visibility / render-inclusion** - `IncludeObject`,
-   `ExcludeObject`, `IncludeLight`, `ExcludeLight` already exist as
-   wrapped commands in `lwcommandport/layout/__init__.py`, just never
-   exposed as clean tools. Near-zero effort, real capability - do this
-   first to clear it off the list.
+1. **Item visibility / render-inclusion - DONE.** `IncludeObject`,
+   `ExcludeObject`, `IncludeLight`, `ExcludeLight` share the same
+   `(itemid)` signature quirk as the `ParentItem`/`TargetItem` family -
+   wrapped with the same `_set_reference_item` helper (resolve both
+   arguments to numeric IDs) rather than assuming it would just work.
+   Confirmed live end to end, via the actual UI panels, not just Cmd
+   History: `lw_include_light`/`lw_exclude_light`/
+   `lw_include_object_light`/`lw_exclude_object_light` all shipped as
+   `server.py` tools. This turns out to control which objects a light
+   illuminates (Light Properties > Objects tab, or equivalently an
+   object's own Item Properties > Lights tab - the same underlying
+   data either way). Confirmed the relationship is genuinely
+   bidirectional and stays in sync: setting it from the light's side
+   (`IncludeObject`) and later toggling it from the object's side
+   (`ExcludeLight`) both correctly updated the same shared list entry,
+   visible identically on both panels, not two separate lists that
+   happened to agree once. See `PLAN.md` "Light/object visibility
+   linking" for the full writeup.
 
 2. **Load real geometry into Layout** - `LoadObject(filename)` exists
    and is unused. Right now this connector can only create Nulls;

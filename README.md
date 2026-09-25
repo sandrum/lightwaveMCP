@@ -111,6 +111,18 @@ and what's explicitly out of scope.
   `goal()`/`pole()` are generic per-item properties, set and read back
   correctly on a plain Null - see `PLAN.md` for the full investigation.
 
+**Light/object visibility linking** (ROADMAP2.md item 1) -
+`lw_include_light(light, obj)`, `lw_exclude_light(light, obj)`,
+`lw_include_object_light(obj, light)`, `lw_exclude_object_light(obj,
+light)` - wraps `IncludeObject`/`ExcludeObject`/`IncludeLight`/
+`ExcludeLight`, controlling which objects a light illuminates (Light
+Properties → Objects tab / Item Properties → Lights tab - the same
+underlying data either way, confirmed to stay in sync from both
+sides). Same numeric-ID fix as the item-relationship tools above.
+Confirmed live end to end via the actual UI panels, not just Cmd
+History: adding, and toggling Include ↔ Exclude, both correctly
+updated the same list entry rather than creating duplicates.
+
 ## Setup
 
 **1. Enable the Command Port (once per Layout session)**
