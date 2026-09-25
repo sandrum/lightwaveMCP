@@ -1118,3 +1118,106 @@ failure modes.
 
 No further work needed for the basic case - `lw_load_object` works.
 `ROADMAP2.md` item 2 is closed; item 3 (scene file I/O) is next.
+
+## Scene file I/O (ROADMAP2.md item 3)
+
+Goal: wrap `SaveScene`/`LoadScene`/`ClearScene`/`SaveObject`, found
+unused in the same command-list survey that grounded `ROADMAP2.md`.
+`SaveScene()` takes no arguments (saves to the scene's already-known
+filename), not useful for the unnamed scenes this project has always
+tested against - used `SaveSceneAs(filename)` instead for the primary
+save path.
+
+**Save/clear/load round trip confirmed live, verified two ways, not
+just "a file appeared":**
+
+1. `lw_save_scene_as(<temp path>.lws)` against the live scene
+   (`BoneTestObject`, `connector_01`, `Light`, `Camera`) - checked the
+   saved file's actual content, not just its existence: it contained
+   `AddNullObject 10000000 BoneTestObject` and `LoadObjectLayer 1
+   10000001 <path>/connector_01.lwo`, the correct numeric IDs matching
+   this project's established ID scheme (see PLAN.md "ParentItem
+   argument format").
+2. `lw_clear_scene()` -> `lw_get_scene_info()` correctly showed just
+   `["Light", "Camera"]`.
+3. `lw_load_scene(<same path>)` - popped a blocking "Change Content
+   Directory?" dialog ("You are trying to load a scene which is not on
+   the current content path") since the temp save path wasn't under
+   LightWave's configured Content Directory. Answering "No" (don't
+   change the content path) still let the scene load correctly -
+   `lw_get_scene_info()` afterward showed `scene_name`/`filename`
+   correctly reflecting the loaded file and all four items restored.
+
+**`lw_save_object` surfaced a real, new problem, not just a rerun of
+an already-solved one.** First attempt (`SelectItem(name)` then
+`SaveObject(filename)`, the same shape as `lw_set_keyframe`) produced
+LightWave's own error dialog: "Null objects are automatically saved
+with the scene" - meaning `SaveObject` had fired against
+`BoneTestObject` (a Null, still the "current object" from earlier
+testing), not `connector_01`, even though `SelectItem("connector_01")`
+had just been sent. `lw_get_selection()` confirmed it directly:
+`connector_01: false`, `BoneTestObject: true`, unchanged.
+
+Ruled out timing as the cause: repeated the `SelectItem`/
+`lw_get_selection` pair as two fully separate tool calls (a real
+network round trip apart, not two sends in one Python function) - no
+change. Ruled out a naming mismatch: `lw_get_item_id("connector_01")`
+resolved cleanly to `"10000001"` via this project's own read path,
+proving the name is exactly right. Tried `SelectItem` with that
+numeric ID directly (the fix already proven for Camera/Light/every
+other item-relationship command in this project) - still no change.
+This ruled out every previously-known failure mode for this command
+family.
+
+Reached for Cmd History again, the same tool that broke open the
+original `ParentItem`/`SetRenderDisplay` investigations: asked the
+user to manually click `connector_01` in Scene Editor. The log showed
+**two** `SelectItem` calls for that one click:
+
+```
+SelectItem 40010000
+SelectItem 10000001
+```
+
+`10000001` matches `lw_get_item_id`'s answer exactly - but `40010000`
+is a new ID pattern never seen in this project before (Object/Light/
+Camera IDs all start `1`/`2`/`3` followed by zeros; this starts `4`).
+Sent both, in that order, via `lw_run_command` - `lw_get_selection()`
+confirmed `connector_01` correctly became current. Tested whether the
+`40010000` call was a one-time context-activation or needed every
+time: switched to `BoneTestObject` via its own numeric ID (`10000000`,
+confirmed working), then switched back to `connector_01` using its
+plain numeric ID (`10000001`) **alone** - this time it worked. The
+`40010000`-style call appears to be a one-time-per-object-per-session
+activation, not a per-call requirement - once something (a manual
+click, or replaying the two-ID sequence) has touched that object's
+selection once, its regular numeric ID becomes reliable afterward.
+
+**Deliberately did not bake a guessed formula into the shipped code.**
+`40010000` invites a tempting pattern (`40000000 + object_index *
+10000`, since `connector_01` was the 2nd object created, index 1) that
+would predict this exact value - but that's one data point. Committing
+an unverified numeric formula into a tool other work will depend on
+risks a repeat of this project's `LWChannelInfo`/`nextGroup` lesson in
+spirit if not in severity: confidently wrong code is worse than an
+honest gap. `lw_save_object` ships with the best *confirmed* fix
+(resolve to the object's real numeric ID rather than trust
+`SelectItem(name)`, consistent with every other tool in this
+connector) and a clearly documented limitation for the untested case,
+rather than a plausible-looking guess. With `SaveObject` finally
+targeting the right item (once activated), the saved file was checked
+byte-level, not just its existence: a real `FORM....LWO3TAGS` header
+followed by genuine surface/tag data (`connector.lwo`, `CONNECTOR`,
+`Generic_CreateConnector`) - a valid, non-corrupted LWO3 file.
+
+**Follow-up worth doing, not attempted this session:** test the
+`40000000 + index*10000` hypothesis against a second and third loaded
+object to see if it actually holds, which would turn this from a
+documented limitation into a real fix. Needs at least two more loaded
+objects and the same Cmd History comparison method used here - not
+attempted now for the same reason the formula wasn't shipped: one
+successful guess is not confirmation.
+
+`ROADMAP2.md` item 3 is closed for the confirmed cases; the
+`lw_save_object` first-selection gotcha for freshly-loaded objects
+remains open, documented rather than silently risking a wrong save.

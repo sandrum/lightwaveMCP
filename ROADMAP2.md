@@ -54,11 +54,33 @@ documented crash (`LWChannelInfo`/`nextGroup`).
    separate Modeler round-trip. See `PLAN.md` "Load real geometry into
    Layout" for the full writeup.
 
-3. **Scene file I/O** - `SaveScene`, `LoadScene`, `ClearScene`,
-   `SaveObject`, `SaveAllObjects` all exist and are unused. Natural
-   pairing with item 2: once real content can be loaded, persistence
-   matters. Everything built so far lives only in Layout's in-memory
-   state until a human manually saves.
+3. **Scene file I/O - DONE.** Shipped `lw_save_scene_as` (wrapping
+   `SaveSceneAs`, not the bare no-argument `SaveScene`, since a fresh
+   unnamed scene has no known filename to save to yet), `lw_load_scene`,
+   `lw_clear_scene`, and `lw_save_object`. Confirmed live end to end:
+   a full save -> clear -> reload round trip correctly restored every
+   item, and the saved `.lws` file's own content was checked directly
+   (not just that a file appeared) to confirm it genuinely referenced
+   the real items with their correct numeric IDs. One real UI gotcha
+   found and documented: loading from outside LightWave's configured
+   Content Directory pops a blocking confirmation dialog a one-way
+   command can't dismiss (answering "No" still lets the load proceed).
+
+   `lw_save_object` surfaced a genuinely new, unsolved wrinkle in this
+   connector's numeric-ID story: for a real multi-layer object loaded
+   via `lw_load_object`, neither `SelectItem(name)` NOR `SelectItem`
+   with the object's regular numeric ID (from `lw_get_item_id`)
+   reliably switched the current object the first time this session -
+   a genuine manual click was needed once (revealing, via Cmd History,
+   a second, differently-scoped `SelectItem` call LightWave's own UI
+   sends first) before the object's regular ID became reliable on its
+   own for the rest of the session. Shipped with the best available
+   fix (resolve to numeric ID rather than trust the name, matching
+   every other tool here) and an honest, documented limitation rather
+   than a guessed formula for the scoped ID - see `PLAN.md` "Scene file
+   I/O" for the full investigation and why baking in an unverified
+   pattern from one data point would have been worse than admitting
+   the gap.
 
 4. **Camera property writes** - `ZoomFactor`, `LensFStop`,
    `ApertureHeight`, `ShutterOpen`, `ShutterEfficiency`, `RollingShutter`

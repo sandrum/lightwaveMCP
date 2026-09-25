@@ -22,6 +22,20 @@ and what's explicitly out of scope.
   in `lw_get_scene_info`, `lw_get_transform` returned a valid
   position). `filename` must be an absolute path readable by the
   LightWave process.
+- **Scene file I/O** (ROADMAP2.md item 3) - `lw_save_scene_as(filename)`,
+  `lw_load_scene(filename)`, `lw_clear_scene()`, `lw_save_object(name,
+  filename)`. Confirmed live end to end: saved a real scene, verified
+  its file content referenced the actual items with correct numeric
+  IDs, cleared the scene, reloaded it, and confirmed every item came
+  back. Loading from outside LightWave's configured Content Directory
+  pops a blocking "Change Content Directory?" dialog a one-way command
+  can't dismiss - answering "No" still lets the scene load.
+  `lw_save_object` has a real, documented limitation: for a freshly
+  loaded multi-layer object (via `lw_load_object`), `SelectItem` by
+  name or by its regular numeric ID may not switch the current object
+  the *first* time this session - a genuine manual click was needed
+  once before automation-only selection became reliable for that
+  object. See `PLAN.md` "Scene file I/O" for the full investigation.
 - `lw_run_command` - generic passthrough to any of the ~800 native
   commands in `lwcommandport/layout/__init__.py`. One-way, no
   confirmation LightWave accepted it, just that it was sent.

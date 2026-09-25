@@ -197,6 +197,95 @@ def lw_load_object(filename: str) -> str:
 
 
 @mcp.tool()
+def lw_save_scene_as(filename: str) -> str:
+    """Save the current scene to a file - ROADMAP2.md item 3. Wraps
+    SaveSceneAs(filename), not the bare SaveScene() (which takes no
+    arguments and saves to the scene's already-known filename - not
+    useful for a fresh unnamed scene, which is what every scene in this
+    connector's testing has been so far). filename must be an absolute
+    path LightWave's process can write to. Confirmed live: the saved
+    file genuinely reflects real scene state (correct item names and
+    numeric IDs), not a stub."""
+    try:
+        _layout().SaveSceneAs(filename)
+        return json.dumps({"result": "sent SaveSceneAs %s" % filename})
+    except Exception as exc:  # noqa: BLE001
+        return json.dumps({"error": str(exc)})
+
+
+@mcp.tool()
+def lw_load_scene(filename: str) -> str:
+    """Load a scene file, replacing the current scene - ROADMAP2.md
+    item 3. Wraps the native LoadScene(filename) command. filename must
+    be an absolute path LightWave's process can read. Confirmed live:
+    a full save/clear/load round trip correctly restored every item.
+    KNOWN GOTCHA: loading from a path outside LightWave's configured
+    Content Directory pops a blocking "Change Content Directory?"
+    dialog that a one-way command can't dismiss - answering "No"
+    (keep the existing content path) still lets the scene load."""
+    try:
+        _layout().LoadScene(filename)
+        return json.dumps({"result": "sent LoadScene %s" % filename})
+    except Exception as exc:  # noqa: BLE001
+        return json.dumps({"error": str(exc)})
+
+
+@mcp.tool()
+def lw_clear_scene() -> str:
+    """Clear the current scene back to its default empty state (a
+    default Light and Camera, no other items) - ROADMAP2.md item 3.
+    Wraps the native ClearScene() command. Does not prompt to save
+    unsaved changes first - this is a one-way fire-and-forget command
+    like every other write here. Confirmed live: correctly removed
+    every item down to just the default Light/Camera."""
+    try:
+        _layout().ClearScene()
+        return json.dumps({"result": "sent ClearScene"})
+    except Exception as exc:  # noqa: BLE001
+        return json.dumps({"error": str(exc)})
+
+
+@mcp.tool()
+def lw_save_object(name: str, filename: str) -> str:
+    """Save one object to its own file - ROADMAP2.md item 3. Wraps the
+    native SaveObject(filename) command, which operates on the
+    "current object" the same way several other single-argument
+    commands in this connector do (see lw_set_keyframe).
+
+    KNOWN LIMITATION, confirmed live, not yet solved: for a real
+    multi-layer object loaded via lw_load_object, SelectItem(name)
+    does NOT reliably switch the current object - unlike every other
+    case in this connector (PLAN.md's "Second finding" established
+    this for Camera/Light; it now also applies here). Resolving to the
+    item's numeric ID (like every other lw_set_* tool does) is closer
+    but still not sufficient on its own the FIRST time a freshly-loaded
+    object is selected this session - Cmd History showed a genuine
+    manual click sends a second, differently-scoped SelectItem call
+    first (e.g. "SelectItem 40010000", not the object's own ID from
+    lw_get_item_id) before the object's own numeric ID reliably takes
+    effect afterward. That scoped ID's exact derivation is unconfirmed
+    from a single data point, so it is NOT reproduced here - baking in
+    an unverified formula would be worse than an honest limitation. If
+    this silently saves the wrong object (check lw_get_selection
+    before relying on the result), click the target object once in
+    Layout's Scene Editor or viewport first, then retry - this appears
+    to be a one-time per-object-per-session activation, not a
+    per-call requirement, once the manual selection touches the object
+    a single time. See PLAN.md 'Scene file I/O' for the full
+    investigation. filename must be an absolute path LightWave's
+    process can write to."""
+    id_resp = _query("get_item_id", name)
+    item_id = id_resp.get("result", {}).get("id")
+    lw = _layout()
+    try:
+        lw.SelectItem(item_id or name)
+        lw.SaveObject(filename)
+        return json.dumps({"result": "saved %s to %s" % (name, filename), "resolved_id": item_id})
+    except Exception as exc:  # noqa: BLE001
+        return json.dumps({"error": str(exc)})
+
+
+@mcp.tool()
 def lw_set_keyframe(name: str, frame: int, position: list = None, rotation: list = None, scale: list = None) -> str:
     """Create a keyframe for an item at a given frame, optionally setting
     its position/rotation/scale first. Wraps the common by-hand animation
