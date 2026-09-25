@@ -82,15 +82,31 @@ documented crash (`LWChannelInfo`/`nextGroup`).
    pattern from one data point would have been worse than admitting
    the gap.
 
-4. **Camera property writes** - `ZoomFactor`, `LensFStop`,
-   `ApertureHeight`, `ShutterOpen`, `ShutterEfficiency`, `RollingShutter`
-   all exist. `lw_get_camera_info` already reads all of this; there's no
-   way to write it. Uses the same numeric-ID `SelectItem` pattern
-   already proven for `lw_set_target`/`lw_set_parent` (see PLAN.md
-   "ParentItem argument format" and "Second finding" for why resolving
-   both the item and the value being set to numeric IDs matters, not
-   just relying on `SelectItem(name)`). Camera before light since
-   composition typically comes first in a real workflow.
+4. **Camera property writes - DONE, with an honest open sub-item.**
+   Shipped `lw_set_camera`, wrapping `ZoomFactor`/`LensFStop`/
+   `ApertureHeight`/`ShutterOpen`/`ShutterEfficiency`/`RollingShutter`
+   into one call (following `lw_set_keyframe`'s bundled-optional-params
+   shape), using the same numeric-ID `SelectItem` pattern already
+   proven for `lw_set_target`/`lw_set_parent`. Also extended
+   `lw_get_camera_info` to read back the three shutter fields, needed
+   to actually verify the writes rather than trust them blind.
+
+   Confirmed live: `zoom_factor` and `aperture_height` take effect
+   immediately. `f_stop` needed a real precondition discovered live -
+   LightWave silently no-ops it and pops "This option only applies when
+   Depth of Field is turned on" unless DOF is enabled first
+   (`DepthOfField()`, confirmed to be a working toggle). The three
+   shutter properties have the same kind of precondition (needs Motion
+   Blur or Particle Blur enabled - confirmed via the same style of
+   error, popped three times for the three properties in one call) but
+   **enabling Motion Blur via automation is not yet solved**:
+   `MotionBlur()`, unlike `DepthOfField()`, does not appear to be a
+   simple toggle - Camera Properties shows it as a button that opens a
+   sub-panel, and calling it did not make the precondition pass.
+   Shipped anyway, since the write commands themselves are legitimate
+   and will work once a human has enabled Motion Blur/DOF through the
+   UI - documented as a real, known limitation rather than papered over.
+   See `PLAN.md` "Camera property writes" for the full investigation.
 
 5. **Light property writes** - `LightIntensity`, `LightColor`,
    `LightFalloffType`, `LightConeAngle`, `LightVisibleToCamera`,

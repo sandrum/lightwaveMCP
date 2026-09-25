@@ -146,13 +146,21 @@ def _get_camera_info(name):
     focalLength/fStop/fovAngles/zoomFactor are animatable channels and
     need a second (time) argument - now the real live playhead time via
     _current_time(), not a hardcoded 0.0 (see _current_time's
-    docstring)."""
+    docstring).
+
+    shutterOpen/shutterEfficiency/rollingShutter added for ROADMAP2.md
+    item 4 (lw_set_camera, the write-side counterpart) - needed a way
+    to verify those writes actually took effect. Signatures not
+    independently confirmed against NewTek docs like the fields above
+    were; tried with the same (id, time) shape as the rest of this
+    function, each wrapped separately so a wrong guess for one doesn't
+    break the others or the whole query."""
     cam_id = _find_item(name)
     if cam_id is None:
         return {"error": "camera not found: %s" % name}
     ci = lwsdk.LWCameraInfo()
     t = _current_time()
-    return {
+    result = {
         "name": name,
         "resolution": list(ci.resolution(cam_id)),
         "focal_length_mm": ci.focalLength(cam_id, t),
@@ -161,6 +169,16 @@ def _get_camera_info(name):
         "zoom_factor": ci.zoomFactor(cam_id, t),
         "evaluated_at_time": t,
     }
+    for key, getter in (
+        ("shutter_open", ci.shutterOpen),
+        ("shutter_efficiency", ci.shutterEfficiency),
+        ("rolling_shutter", ci.rollingShutter),
+    ):
+        try:
+            result[key] = getter(cam_id, t)
+        except Exception as exc:  # noqa: BLE001
+            result[key + "_error"] = str(exc)
+    return result
 
 
 def _get_light_info(name):

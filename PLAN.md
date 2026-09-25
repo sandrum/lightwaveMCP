@@ -1221,3 +1221,66 @@ successful guess is not confirmation.
 `ROADMAP2.md` item 3 is closed for the confirmed cases; the
 `lw_save_object` first-selection gotcha for freshly-loaded objects
 remains open, documented rather than silently risking a wrong save.
+
+## Camera property writes (ROADMAP2.md item 4)
+
+Goal: wrap `ZoomFactor`/`LensFStop`/`ApertureHeight`/`ShutterOpen`/
+`ShutterEfficiency`/`RollingShutter`, closing `lw_get_camera_info`'s
+read-only status. Shipped `lw_set_camera`, bundling all six into one
+call (`lw_set_keyframe`'s optional-params shape), using the numeric-ID
+`SelectItem` fix already established for Camera/Light in "Second
+finding." Also extended `_get_camera_info` to read back
+`shutterOpen`/`shutterEfficiency`/`rollingShutter` (found on
+`LWCameraInfo` in an earlier introspection dump but never previously
+wired up) - needed a real way to verify the new writes rather than
+trust a fire-and-forget send blind.
+
+**`zoom_factor` and `aperture_height` confirmed live immediately** -
+setting `aperture_height` alone (0.6) changed `focal_length_mm` from
+41.25 to 1650.0 at the same `zoom_factor`, a real physical relationship
+(film-back size vs. focal length), not a coincidence.
+
+**`f_stop` silently no-op'd on the first attempt** - set to 2.8, but
+`lw_get_camera_info` still read back the old 4.0. Not a repeat of any
+previously-known failure mode (numeric ID was already correct, per the
+fix above) - a genuinely new kind of problem: a real LightWave
+precondition, not a connector bug. Confirmed by triggering the same
+write via `lw_run_command` directly and asking the user to check for a
+popup: "This option only applies when Depth of Field is turned on."
+Sent the native `DepthOfField()` command once (no arguments - a
+toggle, unlike most commands in this connector) and retried - `f_stop`
+correctly read back as 2.8 afterward.
+
+**The three shutter properties hit the identical pattern, one level
+deeper.** All three silently no-op'd; the same error-dialog check
+revealed "This option only applies when Particle Blur or Motion Blur is
+turned on" (popped three times in a row for one `lw_set_camera` call
+setting all three properties, confirming each is checked
+independently). Sent `MotionBlur()` (same no-argument toggle shape as
+`DepthOfField()`) expecting the same fix - it did not work. Retried
+individually via `lw_run_command("ShutterOpen", [0.02])` and asked for
+a screenshot to check: the same precondition error popped again, AND
+the visible Camera Properties panel showed why - "Motion Blur" and
+"Particle Blur" appear as **buttons** under a "Motion Effects" tab, not
+checkboxes, strongly suggesting they open their own sub-panel/requester
+rather than toggling a simple flag the way `DepthOfField()` evidently
+does. `MotionBlur()` is very likely just the "open that panel" command,
+not an enable/disable toggle - LightWave's own UI naming isn't a
+reliable guide to a command's actual semantics, apparently even
+between two features (DOF vs. Motion Blur) that look identically
+structured in the Properties panel.
+
+**Not solved this session:** how to enable Motion Blur (or Particle
+Blur) via automation. Didn't chase this further given the escalating
+guess-and-check cost already spent on `MotionBlur()` alone - shipped
+`shutter_open`/`shutter_efficiency`/`rolling_shutter` in `lw_set_camera`
+anyway, since the underlying write commands are correct and will work
+the moment a human enables Motion Blur through the UI once; documented
+the precondition clearly rather than silently shipping a tool that
+looks like it works but doesn't, or spending more time chasing a fix
+this session didn't clearly need.
+
+`ROADMAP2.md` item 4 is closed for the confirmed cases (`zoom_factor`,
+`f_stop`, `aperture_height`); enabling Motion Blur/Particle Blur via
+automation remains open, a candidate for its own future investigation
+if shutter-timing control specifically becomes needed.

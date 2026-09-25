@@ -52,7 +52,8 @@ and what's explicitly out of scope.
 - `lw_ping`, `lw_get_scene_info` - round trip + live item list.
 - `lw_get_selection` - every item's name/type/selected state.
 - `lw_get_camera_info`, `lw_get_light_info` - resolution, focal length,
-  f-stop, FOV, zoom / type, falloff, color, intensity, range.
+  f-stop, FOV, zoom, shutter open/efficiency/rolling-shutter skew /
+  type, falloff, color, intensity, range.
 - `lw_get_transform` - position/rotation/scale via `LWItemInfo.param()`.
 - `lw_get_surface_info` - color, diffuse, luminosity, specularity,
   glossiness, reflection, transparency, smoothing via `LWSurfaceFuncs`.
@@ -77,6 +78,22 @@ and what's explicitly out of scope.
 **Render / camera automation**
 - `lw_set_camera_resolution(width, height)` - wraps `FrameSize` (a
   scene-wide render global, not literally per-camera despite the name).
+- `lw_set_camera(camera, zoom_factor=, f_stop=, aperture_height=,
+  shutter_open=, shutter_efficiency=, rolling_shutter=)` (ROADMAP2.md
+  item 4) - the write-side counterpart to `lw_get_camera_info` (which
+  was read-only until now). Same numeric-ID `SelectItem` fix as the
+  item-relationship tools. Confirmed live: `zoom_factor`/
+  `aperture_height` take effect immediately; `f_stop` requires Depth of
+  Field enabled first (`DepthOfField()`, a toggle - LightWave pops "This
+  option only applies when Depth of Field is turned on" and silently
+  no-ops otherwise); `shutter_open`/`shutter_efficiency`/
+  `rolling_shutter` need Motion Blur or Particle Blur enabled, and
+  enabling that via automation is **not yet solved** - `MotionBlur()`
+  doesn't appear to be a simple toggle the way `DepthOfField()` is
+  (Camera Properties shows it as a button opening a sub-panel, not a
+  checkbox). Shipped anyway since the underlying write commands are
+  legitimate for a human-prepared camera - see `PLAN.md` "Camera
+  property writes" for the full investigation.
 - `lw_render_frame(frame=None)`, `lw_render_scene()`, `lw_abort_render()`
   - one-way, fire-and-forget like every command here.
 - `lw_get_render_status()` - the actual point of this group: real

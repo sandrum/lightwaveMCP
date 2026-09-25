@@ -377,12 +377,18 @@ def lw_get_selection() -> str:
 @mcp.tool()
 def lw_get_camera_info(name: str = "Camera") -> str:
     """Get a camera's resolution, focal length, f-stop, field of view,
-    and zoom factor. Animatable values (focal length, f-stop, fov,
-    zoom) are evaluated at LightWave's actual live playhead position
-    (ROADMAP.md's long-standing "querying current time" limitation is
-    solved - see lw_get_current_time), not a hardcoded time - the
-    response's evaluated_at_time field reports exactly what time was
-    used."""
+    zoom factor, shutter open time, shutter efficiency, and rolling
+    shutter skew. Animatable values (focal length, f-stop, fov, zoom,
+    and the shutter fields) are evaluated at LightWave's actual live
+    playhead position (ROADMAP.md's long-standing "querying current
+    time" limitation is solved - see lw_get_current_time), not a
+    hardcoded time - the response's evaluated_at_time field reports
+    exactly what time was used. The shutter_* fields (ROADMAP2.md item
+    4, added as the read-side companion to lw_set_camera) use
+    LWCameraInfo signatures not independently confirmed against NewTek
+    docs the way the other fields were - if one is missing from a
+    response, look for a "<field>_error" key instead; it degrades
+    gracefully rather than breaking the whole query."""
     return json.dumps(_query("get_camera_info", name))
 
 
@@ -461,6 +467,74 @@ def lw_set_camera_resolution(width: int, height: int) -> str:
     try:
         _layout().FrameSize(width, height)
         return json.dumps({"result": "sent FrameSize %d %d" % (width, height)})
+    except Exception as exc:  # noqa: BLE001
+        return json.dumps({"error": str(exc)})
+
+
+@mcp.tool()
+def lw_set_camera(camera: str, zoom_factor: float = None, f_stop: float = None,
+                   aperture_height: float = None, shutter_open: float = None,
+                   shutter_efficiency: float = None, rolling_shutter: float = None) -> str:
+    """Set camera properties - ROADMAP2.md item 4, the write-side
+    counterpart to lw_get_camera_info (which has been read-only until
+    now). Wraps ZoomFactor/LensFStop/ApertureHeight/ShutterOpen/
+    ShutterEfficiency/RollingShutter, following lw_set_keyframe's
+    pattern: any parameter left as None (the default) is not touched,
+    so a single call can set just one property or several at once.
+
+    Resolves `camera` to its numeric ID before calling SelectItem,
+    rather than trusting SelectItem(name) - PLAN.md's "Second finding"
+    already established SelectItem(name) is not reliable for Camera/
+    Light the way it is for Objects, and every camera/light-targeting
+    tool in this connector (lw_set_target, etc.) resolves to numeric
+    IDs unconditionally for exactly this reason.
+
+    CONFIRMED LIVE: zoom_factor and aperture_height take effect
+    immediately (aperture_height's effect on focal_length_mm, given a
+    fixed zoom_factor, is a real physical relationship, not a
+    coincidence). f_stop ALSO confirmed live, but only after Depth of
+    Field is enabled on the camera (native DepthOfField() command, a
+    toggle with no direct read-back) - LightWave pops "This option only
+    applies when Depth of Field is turned on" and silently no-ops
+    otherwise. shutter_open/shutter_efficiency/rolling_shutter have the
+    same kind of precondition (LightWave pops "This option only applies
+    when Particle Blur or Motion Blur is turned on"), confirmed live
+    three times over, but enabling Motion Blur via automation is NOT
+    yet solved: the native MotionBlur() command (unlike DepthOfField())
+    does not appear to be a simple toggle - Camera Properties shows
+    "Motion Blur" as a button opening a sub-panel, not a checkbox, and
+    calling MotionBlur() did not make the precondition pass. These
+    three properties are shipped as-is since the underlying write
+    commands are legitimate and will work once a human has enabled
+    Motion Blur or Particle Blur through the UI - just don't assume
+    they'll take effect standalone. See PLAN.md 'Camera property
+    writes' for the full investigation."""
+    camera_id, id_resp = _resolve_item_id(camera)
+    if not camera_id:
+        return json.dumps({"error": "could not resolve camera: %s" % camera, "detail": id_resp})
+    lw = _layout()
+    sent = []
+    try:
+        lw.SelectItem(camera_id)
+        if zoom_factor is not None:
+            lw.ZoomFactor(zoom_factor)
+            sent.append("ZoomFactor")
+        if f_stop is not None:
+            lw.LensFStop(f_stop)
+            sent.append("LensFStop")
+        if aperture_height is not None:
+            lw.ApertureHeight(aperture_height)
+            sent.append("ApertureHeight")
+        if shutter_open is not None:
+            lw.ShutterOpen(shutter_open)
+            sent.append("ShutterOpen")
+        if shutter_efficiency is not None:
+            lw.ShutterEfficiency(shutter_efficiency)
+            sent.append("ShutterEfficiency")
+        if rolling_shutter is not None:
+            lw.RollingShutter(rolling_shutter)
+            sent.append("RollingShutter")
+        return json.dumps({"result": "set %s on %s (id %s)" % (sent, camera, camera_id)})
     except Exception as exc:  # noqa: BLE001
         return json.dumps({"error": str(exc)})
 
