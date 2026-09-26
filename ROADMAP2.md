@@ -164,16 +164,35 @@ documented crash (`LWChannelInfo`/`nextGroup`).
    Together, items 4 and 5 close the biggest remaining "reads but
    can't write" gap in the connector.
 
-6. **Multi-item / bulk selection investigation** - `AddToSelection`
-   was tested during earlier work (see PLAN.md) and appeared to do
+6. **Multi-item / bulk selection investigation - DONE, mixed result.**
+   `AddToSelection` was tested during earlier work and appeared to do
    nothing observable - `lw_get_selection` showed no change after
-   calling it. Worth a dedicated investigation before committing
-   further: if it's fixable, it makes every write tool above more
-   efficient (batch operations instead of one item at a time). If it's
-   a genuine dead end like Modeler reads, better to document that now
-   than assume multi-select works later. Placed after the core
-   scene-building tools (2-5) since those are higher-value on their
-   own regardless of how this turns out.
+   calling it. Root cause: that earlier check used the unreliable
+   `flags() & LWITEMF_SELECTED` read (documented as broken in
+   `lw_get_selection`'s own docstring, returned the same value for
+   every item), not `LWItemInfo().selected()`. Re-tested with the
+   correct read and it works exactly as expected: shipped
+   `lw_add_to_selection`/`lw_remove_from_selection`, confirmed live end
+   to end (by name, through the numeric-ID resolver) that both
+   correctly add/remove one item at a time from a real multi-selection
+   without disturbing the rest, verified against both
+   `lw_get_selection` and a Scene Editor screenshot showing both rows
+   genuinely highlighted.
+
+   **But this doesn't unlock the batch-write efficiency this item was
+   hoping for.** Confirmed live: with two Objects selected this way,
+   sending a write command (`AddPosition(1, 0, 0)`) only moved the one
+   most recently touched by `AddToSelection` - the other, still
+   `selected: true`, didn't move. Every command sent over the one-way
+   Command Port acts on a single "current item" pointer, not the
+   highlighted selection set as a whole - the same "current item"
+   concept `_set_reference_item` already works around via `SelectItem`.
+   These two tools are genuinely useful for building/inspecting a
+   selection-state result (e.g. handing a user a specific multi-select
+   for their own subsequent manual work), but every write tool in this
+   connector still needs its own per-item loop - there's no shortcut
+   for batching writes across multiple items in one call. See `PLAN.md`
+   "Multi-item / bulk selection investigation" for the full writeup.
 
 7. **IK chain configuration writes** - enable/disable "Full-Time IK"
    and related chain-level flags (visible in Motion Options > IK and

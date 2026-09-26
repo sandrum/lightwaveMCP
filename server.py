@@ -375,6 +375,64 @@ def lw_get_selection() -> str:
 
 
 @mcp.tool()
+def lw_add_to_selection(item: str) -> str:
+    """Add an item to the current multi-selection without replacing it
+    (ROADMAP2.md item 6) - unlike lw_set_parent's SelectItem-then-command
+    shape, AddToSelection(itemid) IS the command, so this just resolves
+    the numeric ID and sends it directly, no preceding SelectItem.
+
+    Confirmed live end to end: after SelectItem on one Object then this
+    on a second, lw_get_selection correctly showed BOTH as
+    selected: true, and a Scene Editor screenshot confirmed both rows
+    genuinely highlighted - not just an artifact of the read side. This
+    closes out the original suspicion that AddToSelection "does
+    nothing" (see PLAN.md "Multi-item / bulk selection investigation")
+    - that read used the unreliable flags() & LWITEMF_SELECTED check
+    lw_get_selection's own docstring warns about, not
+    LWItemInfo().selected().
+
+    IMPORTANT real limitation, also confirmed live: multi-selection
+    does NOT make write commands apply to every selected item. Sending
+    AddPosition(1, 0, 0) with two Objects selected this way only moved
+    the second (the one most recently touched by AddToSelection) -
+    the first, still shown as selected: true, did not move. Write
+    commands sent over the Command Port act on a single "current item"
+    pointer, not the highlighted selection set - this tool is for
+    building a visual/selection-state result, not for batching writes
+    across multiple items in one call. Every other write tool in this
+    connector still needs its own per-item SelectItem/resolve-and-send
+    loop."""
+    item_id, id_resp = _resolve_item_id(item)
+    if not item_id:
+        return json.dumps({"error": "could not resolve item: %s" % item, "detail": id_resp})
+    lw = _layout()
+    try:
+        lw.AddToSelection(item_id)
+        return json.dumps({"result": "added %s (id %s) to selection" % (item, item_id)})
+    except Exception as exc:  # noqa: BLE001
+        return json.dumps({"error": str(exc)})
+
+
+@mcp.tool()
+def lw_remove_from_selection(item: str) -> str:
+    """Remove one item from the current multi-selection without
+    affecting the rest (ROADMAP2.md item 6) - the inverse of
+    lw_add_to_selection, same shape. Confirmed live: removing one of
+    two Objects added via lw_add_to_selection correctly dropped it back
+    to selected: false in lw_get_selection while the other stayed
+    selected: true."""
+    item_id, id_resp = _resolve_item_id(item)
+    if not item_id:
+        return json.dumps({"error": "could not resolve item: %s" % item, "detail": id_resp})
+    lw = _layout()
+    try:
+        lw.RemoveFromSelection(item_id)
+        return json.dumps({"result": "removed %s (id %s) from selection" % (item, item_id)})
+    except Exception as exc:  # noqa: BLE001
+        return json.dumps({"error": str(exc)})
+
+
+@mcp.tool()
 def lw_get_camera_info(name: str = "Camera") -> str:
     """Get a camera's resolution, focal length, f-stop, field of view,
     zoom factor, shutter open time, shutter efficiency, and rolling

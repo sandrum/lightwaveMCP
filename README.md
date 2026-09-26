@@ -47,6 +47,22 @@ and what's explicitly out of scope.
   convention); the read-side `lw_get_transform` reports rotation in
   **radians** (the SDK's convention) - a real unit mismatch to be aware
   of, not a bug.
+- `lw_add_to_selection(item)`, `lw_remove_from_selection(item)`
+  (ROADMAP2.md item 6) - add/remove one item from a real multi-item
+  selection without disturbing the rest. Confirmed live end to end (by
+  name, through the numeric-ID resolver): `lw_get_selection` correctly
+  showed two Objects `selected: true` simultaneously, matching a Scene
+  Editor screenshot with both rows genuinely highlighted. The earlier
+  suspicion that `AddToSelection` "does nothing" was a broken-read
+  artifact (checking `flags() & LWITEMF_SELECTED`, not
+  `LWItemInfo().selected()`), not a real bug. **Real limitation
+  confirmed live:** this does not enable batch writes - a write command
+  sent afterward (`AddPosition`) only affected the single most
+  recently-touched item, not every item shown as selected. Every write
+  tool in this connector still needs its own per-item loop; these two
+  tools are for representing/building a selection state, not batching
+  writes. See `PLAN.md` "Multi-item / bulk selection investigation" for
+  the full investigation.
 
 **Layout reads** (all via `LWComRing`, see Setup step 2)
 - `lw_ping`, `lw_get_scene_info` - round trip + live item list.

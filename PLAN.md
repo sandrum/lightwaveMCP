@@ -1412,3 +1412,71 @@ the right tool for these two, same as `DepthOfField()` for item 4's
 `ROADMAP2.md` item 5 is closed. Combined with item 4, this closes the
 biggest remaining "reads but can't write" gap in the connector for
 Camera and Light items.
+
+## Multi-item / bulk selection investigation (ROADMAP2.md item 6)
+
+Goal: figure out whether `AddToSelection` (tested during earlier work
+and appearing to do nothing observable) is fixable, since real
+multi-select would let every write tool above batch across items
+instead of looping one item at a time.
+
+**Root cause of the original "does nothing" finding.** The earlier
+check read selection state via `flags() & LWITEMF_SELECTED` - the same
+API `lw_get_selection`'s own docstring already documents as unreliable
+("returned the same value for every item"). It was never a real test of
+`AddToSelection`, just a broken read making a working command look
+broken. Confirmed by re-running with `LWItemInfo().selected()` (the
+read `lw_get_selection` actually uses) instead.
+
+**Re-tested live, properly this time.** Checked `lwcommandport`'s stub
+first - `AddToSelection`/`RemoveFromSelection` were already correctly
+wrapped with `*args` and a `(itemid,)` argument check, unlike the
+`Ring`/`SetRenderDisplay`/`MotionBlur`/`LightFalloffType` bugs found
+earlier this phase, so no stub fix was needed here. Sequence: found two
+Objects already in the live test scene already showing a real baseline
+of simultaneous selection across categories (`lw_get_selection` showed
+an Object, a Light, AND the Camera all `selected: true` at once before
+touching anything - LightWave apparently keeps one "current" selection
+per item-type category, all of which can be true simultaneously - this
+is not the same thing as multi-selecting two items of the SAME type).
+Isolated a clean test: `SelectItem(BoneTestObject's id)` to reset the
+Object category down to one, confirmed only that one was
+`selected: true`, then `AddToSelection(second Object's id)`.
+`lw_get_selection` correctly showed BOTH Objects as `selected: true`
+simultaneously afterward, and a live Scene Editor screenshot confirmed
+both rows were genuinely highlighted, not a read-side illusion. Tested
+`RemoveFromSelection` the same way - correctly dropped one item back to
+`selected: false` while leaving the other selected.
+
+Shipped `lw_add_to_selection(item)`/`lw_remove_from_selection(item)`,
+resolving name to numeric ID first (same pattern as every other
+item-reference tool here) since `AddToSelection`/`RemoveFromSelection`
+share the "wants a numeric ID" quirk with the rest of this command
+family. Unlike `_set_reference_item`'s shape, no preceding `SelectItem`
+call is needed - `AddToSelection`/`RemoveFromSelection` ARE the
+selection-modifying commands themselves. Confirmed live end to end
+after a Claude Desktop restart, by name (not raw ID, to prove the
+resolver path): added `BoneTestObject` back into a two-item selection,
+then removed it again, both correctly reflected in `lw_get_selection`.
+
+**The real finding, and why this doesn't fully deliver on the item's
+original hope.** Tested whether a write command would apply to the
+whole selection once two items were genuinely multi-selected: sent
+`AddPosition(1, 0, 0)` with both `BoneTestObject` and
+`lightwavemcp_test_object_out` reading `selected: true`. Only
+`lightwavemcp_test_object_out` (the one most recently touched, via
+`AddToSelection`) actually moved - `lw_get_transform` on
+`BoneTestObject` still showed `[0, 0, 0]` afterward. Multi-selection is
+real and correctly tracked by `LWItemInfo().selected()`/the UI
+highlight, but write commands sent over the one-way Command Port still
+only affect a single "current item" pointer - the same concept
+`_set_reference_item` already has to manage via `SelectItem` for
+`lw_set_parent`/`lw_set_target`/etc. There is no discovered mechanism
+in this connector's command set for a single write call to fan out
+across an entire highlighted selection.
+
+`ROADMAP2.md` item 6 is closed: `AddToSelection`/`RemoveFromSelection`
+are confirmed real and shipped, but they solve "represent a
+multi-item selection state," not "batch a write across multiple
+items" - every write tool in this connector still needs its own
+per-item loop.
