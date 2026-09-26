@@ -1480,3 +1480,120 @@ are confirmed real and shipped, but they solve "represent a
 multi-item selection state," not "batch a write across multiple
 items" - every write tool in this connector still needs its own
 per-item loop.
+
+## IK chain configuration writes (ROADMAP2.md item 7)
+
+Goal: enable/disable "Full-Time IK" and related chain-level flags
+(Motion Options > IK and Modifiers), the piece `lw_set_goal`/
+`lw_set_pole` don't cover - those two assign which item is the
+goal/pole, this is about the chain's own behavior around that
+assignment.
+
+**Surveyed the stub first, before touching the UI.** Grepped
+`lwcommandport/layout/__init__.py` for IK-related commands:
+`GoalStrength`/`GoalObjective`/`SoftIK`/`SoftIKDistanceType`/
+`SoftIKMin`/`SoftIKMax`/`IKInitialState`/`IKInitialStateFrame`/
+`IKFKBlending`/`UseIKChainVals` were all already correctly wrapped with
+real `*args` and an argument-count check - no repeat of the
+`Ring`/`SetRenderDisplay`/`MotionBlur`/`LightFalloffType` bug in this
+command family. Five candidates were wrapped bare, no arguments at
+all: `UnaffectedByIK`, `EnableIK`, `EnableDeformations`, `EnableMC`,
+`FullTimeIK` - the same shape that's turned out to be a real bug three
+times this phase and a genuine toggle twice. Only investigated the two
+this item's own description actually named (`FullTimeIK`,
+`UnaffectedByIK`) rather than chasing all five blind.
+
+**Both confirmed live as genuine argument-less toggles, matching the
+`LightVisibleToCamera` precedent, not the `MotionBlur` one.** Selected
+a real bone (`Bone1`, part of an actual `BoneTestObject`/`Bone1`/`Bone2`
+chain) and opened Motion Options > IK and Modifiers. Clicked
+"Unaffected by IK of Descendants" - Cmd History logged a bare
+`UnaffectedByIK`, no argument following. "Full-time IK" was initially
+grayed out and unclickable - a real precondition, found by assigning a
+Goal Object (`lightwavemcp_test_object_out`, via the Goal Object
+dropdown) to the same bone, after which it became clickable AND was
+already checked, auto-enabled as a side effect of the goal assignment
+itself rather than requiring its own command (Cmd History showed only
+`GoalItem 10000001`, no separate `FullTimeIK` entry, at that point).
+Unchecked it manually - Cmd History logged a bare `FullTimeIK`, same
+shape as `UnaffectedByIK`. Neither needed a stub fix.
+
+**`GoalStrength`/`IKFKBlending` confirmed live too**, sent directly via
+`lw_run_command` before writing any wrapper: `GoalStrength(0.5)` and
+`IKFKBlending(0.3)` on the same bone immediately showed as "Goal
+Strength: 0.5" and "IK/FK Blending: 30.0%" in Motion Options - the
+same 0.0-1.0-fraction-displayed-as-percent convention already known
+from `lw_set_camera`'s `shutter_efficiency`. Neither showed a
+precondition - both were visible and settable before any Goal Object
+was assigned, unlike `FullTimeIK`.
+
+Shipped `lw_set_ik_options(item, goal_strength=, ik_fk_blending=)`
+(bundled-optional-params shape, like `lw_set_camera`/`lw_set_light`)
+and `lw_toggle_ik_flag(item, flag)` (flag is `"full_time_ik"` or
+`"unaffected_by_ik"` - a small dispatch tool rather than two separate
+one-line tools, since both share the identical
+resolve-select-then-bare-call shape). `lw_toggle_ik_flag` flips rather
+than sets, documented the same way `lw_set_light` documents
+`LightVisibleToCamera`/`LightCastsShadows`: there's no way to read
+either flag's current state back, so a caller can't know in advance
+which direction a toggle will move it.
+
+**The real discovery of this item: bones were completely unaddressable
+by this connector, for any purpose, not just IK.** Tried testing the
+new tools against `"Bone1"` by name first, the same way every other
+tool here resolves names - `_resolve_item_id` failed with "item not
+found: Bone1". Root cause: `_find_item` (used by `lw_get_item_id`, and
+so by `_resolve_item_id`) only iterates `LWI_OBJECT`/`LWI_LIGHT`/
+`LWI_CAMERA` - it has never walked `LWI_BONE`, which is a separate
+traversal only `_get_bones` performs (see "Bone chain traversal"
+above), and `_get_bones` itself never captured each bone's own item ID,
+only its name/parent/goal/pole. This was a real, previously-unnoticed
+gap: no tool in this entire connector could ever target a bone by
+name, for reading OR writing, before this investigation - the earlier
+bone work (ROADMAP.md item 11/STATUS.md item 2) only ever reported
+bones as data, never let anything address one afterward.
+
+Fixed two ways:
+1. `_get_bones` now includes `"id": lwsdk.itemid_to_str(bone_id)` on
+   every bone entry, the identical conversion `_get_item_id` already
+   uses for Objects/Lights/Cameras - exposed automatically through
+   `lw_get_hierarchy` since that's `_get_bones`'s only caller.
+2. `_resolve_item_id` (server.py) now checks `name.isdigit()` first and
+   passes a purely numeric string straight through as the ID, instead
+   of always treating its argument as a name to look up. This is a
+   general fix, not IK-specific - any tool built on `_resolve_item_id`
+   can now be pointed at a raw numeric ID obtained some other way (like
+   a bone's `id` from `lw_get_hierarchy`), not just a name `_find_item`
+   can already see.
+
+Confirmed live end to end, after a Claude Desktop restart (server.py)
+and a Layout plugin reload (lw_mcp_ring.py): `lw_get_hierarchy` reported
+`Bone1`'s id as `"40000000"` - matching, exactly, Cmd History's own log
+of a real manual click on that same bone in the Scene Editor
+(`"SelectItem 40000000"`), confirming bones live in their own ID range
+distinct from Object/Light/Camera's 10000000/20000000/30000000 (and
+`Bone2` reported as `"40010000"`). Re-ran both new tools against
+`"40000000"` directly: `lw_set_ik_options(goal_strength=0.9)` showed
+"Goal Strength: 0.9" in Motion Options, and `lw_toggle_ik_flag(flag=
+"unaffected_by_ik")` correctly unchecked the box, both confirmed via
+screenshot and matching Cmd History entries.
+
+Note for a future session: `Bone2`'s ID is `"40010000"` - the EXACT
+same value as the unexplained "differently-scoped" `SelectItem 40010000`
+Cmd History showed during item 3's investigation (see "Scene file I/O"
+above), which was left as an honest documented gap rather than a
+guessed formula (`40000000 + index * 10000`, since `connector_01` was
+the 2nd object loaded that session, index 1). Here, `Bone2` is also the
+2nd bone in its chain (index 1), and also landed on `40010000` -
+completely independent contexts (one-time object-selection activation
+vs. a bone's permanent item ID) producing the identical number for
+"index 1" is real, if still circumstantial, support for that formula
+being a genuine general LightWave convention (some kind of
+position-within-a-collection ID scheme), not coincidence. Still only
+two data points from two different phenomena, not a confirmed formula
+for item 3's original object-selection case specifically - worth the
+two/three-more-loaded-objects test item 3 already proposed, now with
+more reason to expect it'll hold. Not chased further this session
+since it's new, separate scope from item 7.
+
+`ROADMAP2.md` item 7 is closed.

@@ -194,13 +194,51 @@ documented crash (`LWChannelInfo`/`nextGroup`).
    for batching writes across multiple items in one call. See `PLAN.md`
    "Multi-item / bulk selection investigation" for the full writeup.
 
-7. **IK chain configuration writes** - enable/disable "Full-Time IK"
-   and related chain-level flags (visible in Motion Options > IK and
-   Modifiers, e.g. "Unaffected by IK of Descendants" - the exact
-   command names for these weren't confirmed in the item-1 survey and
-   need their own look). Niche (rigging-specific) - `lw_set_goal`/
-   `lw_set_pole` already cover the per-item goal/pole assignment; this
-   is about the chain-level behavior around them.
+7. **IK chain configuration writes - DONE, plus a real bone-ID gap
+   found and fixed along the way.** Shipped `lw_set_ik_options(item,
+   goal_strength=, ik_fk_blending=)` and `lw_toggle_ik_flag(item, flag)`
+   (`flag` is `"full_time_ik"` or `"unaffected_by_ik"`). Surveyed the
+   stub first: `GoalStrength`/`IKFKBlending`/`GoalObjective`/`SoftIK`
+   family/`IKInitialState`/`UseIKChainVals` were all already correctly
+   wrapped with real arguments - no stub bug in this command family.
+   `UnaffectedByIK`/`FullTimeIK`/`EnableIK`/`EnableDeformations`/
+   `EnableMC` were the only bare zero-arg candidates, matching the
+   shape that turned out to be a real bug three times this phase
+   (`Ring`/`SetRenderDisplay`/`MotionBlur`) and a genuine toggle twice
+   (`LightVisibleToCamera`/`LightCastsShadows`) - checked the two named
+   in this item's own description live rather than assuming either way.
+
+   Confirmed live on a real bone in an actual chain (`Bone1` under
+   `BoneTestObject`, goaled to `lightwavemcp_test_object_out`):
+   `goal_strength`/`ik_fk_blending` took effect immediately (Motion
+   Options showed "Goal Strength: 0.9" / "IK/FK Blending: 30.0%"
+   right after sending 0.9 / 0.3 - the same 0.0-1.0-fraction-as-percent
+   convention as `lw_set_camera`'s `shutter_efficiency`).
+   `UnaffectedByIK`/`FullTimeIK` are both confirmed genuine
+   argument-less toggles (Cmd History logged them bare after clicking
+   the real checkboxes) - no stub fix needed, and no way to set/read a
+   known state, so `lw_toggle_ik_flag` flips rather than sets, the same
+   honest limitation as the Light toggles. Real precondition found:
+   "Full-time IK" is grayed out until the item has a Goal Object
+   assigned - LightWave auto-checks it as a side effect of the goal
+   assignment itself, no separate command needed.
+
+   **The real discovery: bones have no name this connector could
+   resolve at all.** `lw_get_item_id`/`_resolve_item_id` only search
+   Objects/Lights/Cameras (`_find_item`'s item-type list never included
+   `LWI_BONE`) - a bone genuinely could not be targeted by name through
+   any tool here, IK-related or not. Fixed two ways: `_get_bones` (in
+   `lw_mcp_ring.py`) now reports each bone's own numeric "id" via
+   `lwsdk.itemid_to_str()`, exposed through `lw_get_hierarchy`; and
+   `_resolve_item_id` now passes a purely numeric `item` string straight
+   through instead of always trying to look it up by name. Confirmed
+   live end to end: `lw_get_hierarchy` reported `Bone1`'s id as
+   `"40000000"`, matching Cmd History's own log of a real manual click
+   on that bone in the Scene Editor (`"SelectItem 40000000"`) exactly -
+   bones live in their own ID range, distinct from Object/Light/Camera's
+   10000000/20000000/30000000. Both new tools were then re-tested with
+   that real numeric ID and worked correctly. See `PLAN.md` "IK chain
+   configuration writes" for the full investigation.
 
 8. **Surface/material writes** - genuinely new territory. No simple
    native command exists for this (`SurfaceEditor` in the command list

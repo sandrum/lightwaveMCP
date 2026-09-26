@@ -782,10 +782,22 @@ def lw_get_item_id(name: str) -> str:
 
 
 def _resolve_item_id(name):
-    """Shared by lw_set_parent/lw_set_target/lw_set_goal/lw_set_pole -
-    all four native commands share the same "wants a numeric ID, not a
-    name" quirk (see lw_get_item_id's docstring), so they share this
-    resolve-then-select-then-send shape too."""
+    """Shared by lw_set_parent/lw_set_target/lw_set_goal/lw_set_pole/
+    lw_set_ik_options/lw_toggle_ik_flag - all these native commands
+    share the same "wants a numeric ID, not a name" quirk (see
+    lw_get_item_id's docstring), so they share this
+    resolve-then-select-then-send shape too.
+
+    A purely numeric `name` (e.g. "40000000") is passed through as-is
+    rather than looked up by name. Needed for bones (ROADMAP2.md item
+    7): lw_get_item_id/_find_item only searches Objects/Lights/Cameras,
+    never bones (a separate LWI_BONE traversal, see lw_mcp_ring.py's
+    _get_bones), so a bone has no name this resolver can look up at
+    all - the caller must get its ID from lw_get_hierarchy (which
+    reports each bone's "id" field) and pass that numeric string
+    straight through."""
+    if name.isdigit():
+        return name, {"result": {"name": name, "id": name}}
     id_resp = _query("get_item_id", name)
     return id_resp.get("result", {}).get("id"), id_resp
 
@@ -871,6 +883,82 @@ def lw_set_pole(item: str, pole: str) -> str:
     plain Null with lw_get_hierarchy correctly showing both
     afterward."""
     return _set_reference_item("PoleItem", item, pole)
+
+
+@mcp.tool()
+def lw_set_ik_options(item: str, goal_strength: float = None, ik_fk_blending: float = None) -> str:
+    """Set an item's chain-level IK numeric properties (ROADMAP2.md item
+    7, the piece lw_set_goal/lw_set_pole don't cover - those handle
+    which item is the goal/pole, this handles how strongly the chain
+    follows it). Wraps GoalStrength/IKFKBlending, following
+    lw_set_camera/lw_set_light's bundled-optional-params shape and the
+    same numeric-ID SelectItem pattern. Both already took a real
+    argument in lwcommandport - no stub bug found here, unlike several
+    other commands surveyed this phase.
+
+    Confirmed live on a real bone (Bone1, in an actual BoneTestObject
+    chain, with a Goal Object already assigned via lw_set_goal): sent
+    goal_strength=0.5, ik_fk_blending=0.3, and a Motion Options
+    screenshot showed "Goal Strength: 0.5" and "IK/FK Blending: 30.0%"
+    immediately. ik_fk_blending is a 0.0-1.0 fraction displayed as a
+    percentage, the same convention as lw_set_camera's
+    shutter_efficiency - 0.3 shows as 30.0%, not 0.3%. Neither property
+    showed a precondition the way FullTimeIK does (see
+    lw_toggle_ik_flag) - both were visible and settable in Motion
+    Options before any Goal Object was assigned."""
+    item_id, id_resp = _resolve_item_id(item)
+    if not item_id:
+        return json.dumps({"error": "could not resolve item: %s" % item, "detail": id_resp})
+    lw = _layout()
+    sent = []
+    try:
+        lw.SelectItem(item_id)
+        if goal_strength is not None:
+            lw.GoalStrength(goal_strength)
+            sent.append("GoalStrength")
+        if ik_fk_blending is not None:
+            lw.IKFKBlending(ik_fk_blending)
+            sent.append("IKFKBlending")
+        return json.dumps({"result": "set %s on %s (id %s)" % (sent, item, item_id)})
+    except Exception as exc:  # noqa: BLE001
+        return json.dumps({"error": str(exc)})
+
+
+@mcp.tool()
+def lw_toggle_ik_flag(item: str, flag: str) -> str:
+    """Flip FullTimeIK or UnaffectedByIK for an item's IK chain
+    (ROADMAP2.md item 7). flag must be "full_time_ik" or
+    "unaffected_by_ik".
+
+    Both are confirmed live to be genuine argument-less TOGGLES, same
+    situation as lw_set_light's deliberately-unwrapped
+    LightVisibleToCamera/LightCastsShadows: Cmd History showed a bare
+    "FullTimeIK"/"UnaffectedByIK" with no argument following after
+    clicking each real checkbox in Motion Options > IK and Modifiers on
+    a live bone. There is no way to read either flag's current state
+    back, so this FLIPS whatever it currently is rather than setting a
+    known value - call it once, then check the Motion Options panel (or
+    just call it again to flip back) if the direction matters.
+
+    Real precondition confirmed live: "Full-time IK" is grayed out and
+    unclickable in the UI until the item has a Goal Object assigned
+    (lw_set_goal) - LightWave auto-checked it as a side effect of
+    assigning the goal, before this tool was ever called, rather than
+    requiring a separate command. "Unaffected by IK of Descendants" had
+    no such precondition - it was clickable immediately."""
+    item_id, id_resp = _resolve_item_id(item)
+    if not item_id:
+        return json.dumps({"error": "could not resolve item: %s" % item, "detail": id_resp})
+    command = {"full_time_ik": "FullTimeIK", "unaffected_by_ik": "UnaffectedByIK"}.get(flag)
+    if not command:
+        return json.dumps({"error": "flag must be 'full_time_ik' or 'unaffected_by_ik', got %r" % flag})
+    lw = _layout()
+    try:
+        lw.SelectItem(item_id)
+        getattr(lw, command)()
+        return json.dumps({"result": "toggled %s on %s (id %s)" % (command, item, item_id)})
+    except Exception as exc:  # noqa: BLE001
+        return json.dumps({"error": str(exc)})
 
 
 @mcp.tool()

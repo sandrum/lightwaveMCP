@@ -189,6 +189,40 @@ and what's explicitly out of scope.
   `goal()`/`pole()` are generic per-item properties, set and read back
   correctly on a plain Null - see `PLAN.md` for the full investigation.
 
+**IK chain configuration** (ROADMAP2.md item 7) -
+`lw_set_ik_options(item, goal_strength=, ik_fk_blending=)`,
+`lw_toggle_ik_flag(item, flag)` (`flag` is `"full_time_ik"` or
+`"unaffected_by_ik"`). Confirmed live on a real bone: `goal_strength`/
+`ik_fk_blending` take effect immediately (Motion Options showed "Goal
+Strength: 0.9" / "IK/FK Blending: 30.0%" right after sending them - the
+0.0-1.0-as-percent convention already known from `lw_set_camera`'s
+`shutter_efficiency`). `full_time_ik`/`unaffected_by_ik` are confirmed
+genuine argument-less toggles (Cmd History logged them bare after
+clicking the real checkboxes) with no way to read a known state back,
+so `lw_toggle_ik_flag` flips rather than sets - same limitation as
+`lw_set_light`'s unwrapped `LightVisibleToCamera`/`LightCastsShadows`.
+"Full-time IK" is grayed out until a Goal Object is assigned
+(`lw_set_goal`) - LightWave auto-checks it as a side effect of the goal
+assignment, no separate command needed.
+
+Found and fixed a real gap along the way: **bones could not be
+targeted by name through this connector at all**, for reading or
+writing - `lw_get_item_id`/`_resolve_item_id` only search Objects/
+Lights/Cameras, never bones (a separate `LWI_BONE` traversal only
+`_get_bones` performs). Fixed by having `_get_bones` report each bone's
+own numeric `id` (now visible via `lw_get_hierarchy`) and by having
+`_resolve_item_id` pass a purely numeric `item` string straight through
+instead of always searching for it by name - so a bone's ID, once known
+via `lw_get_hierarchy`, can be fed directly into any tool built on
+`_resolve_item_id`. Confirmed live: bones have their own ID range,
+`40000000+`, distinct from Object/Light/Camera's
+`10000000+`/`20000000+`/`30000000+` - `lw_get_hierarchy` reporting
+`Bone1`'s id as `"40000000"` matched Cmd History's own log of a real
+manual click on that bone exactly. See `PLAN.md` "IK chain
+configuration writes" for the full investigation, including a
+suggestive (not yet confirmed) link to item 3's unexplained
+`SelectItem 40010000`.
+
 **Light/object visibility linking** (ROADMAP2.md item 1) -
 `lw_include_light(light, obj)`, `lw_exclude_light(light, obj)`,
 `lw_include_object_light(obj, light)`, `lw_exclude_object_light(obj,

@@ -327,7 +327,17 @@ def _get_bones(ii, object_id):
     as every other item here, plus which bone (if any, within the same
     object) it's parented to - a bone's own parent() can point outside
     the chain (e.g. to the host object) so that's resolved by name
-    like everything else, not assumed to be another bone."""
+    like everything else, not assumed to be another bone.
+
+    ROADMAP2.md item 7: also reports each bone's own numeric "id" (via
+    lwsdk.itemid_to_str(), the same conversion _get_item_id uses) -
+    added because bones have no other way to get a numeric ID from this
+    connector. Confirmed live via Cmd History that manually clicking a
+    bone in the Scene Editor logs "SelectItem 40000000" - bones live in
+    their own ID range, distinct from Object/Light/Camera's
+    10000000/20000000/30000000. server.py's _resolve_item_id passes a
+    purely numeric `item` string straight through so this ID can be fed
+    directly into lw_set_ik_options/lw_toggle_ik_flag/lw_set_goal/etc."""
     bones = []
     bone_id = ii.first(lwsdk.LWI_BONE, object_id)
     count = 0
@@ -335,6 +345,7 @@ def _get_bones(ii, object_id):
         entry = {
             "name": ii.name(bone_id),
             "type": "BONE",
+            "id": lwsdk.itemid_to_str(bone_id),
             "parent": _resolve_name(ii, ii.parent(bone_id)),
         }
         for key, getter in (("target", ii.target), ("goal", ii.goal), ("pole", ii.pole)):
