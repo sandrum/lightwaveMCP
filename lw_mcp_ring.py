@@ -182,7 +182,22 @@ def _get_camera_info(name):
 
 
 def _get_light_info(name):
-    """Same live-time fix as _get_camera_info."""
+    """Same live-time fix as _get_camera_info.
+
+    ROADMAP2.md item 5: falloff(light_id) is a known-stale read - it
+    always reports the scene-default value regardless of what
+    lw_set_light's falloff_type just wrote. Confirmed via UI screenshot
+    that the WRITE genuinely takes effect (Light Properties showed
+    "Intensity Falloff: Inv Distance^2" right after setting
+    falloff_type=2) while this field kept reporting the original
+    default. Also tried li.falloff(light_id, t) (the (id, time) shape
+    every other animatable field here uses) in case falloff is
+    channel-driven like they are - confirmed live that this does NOT
+    fix it either, it just returns the same stale value without even
+    raising, so there's no exception to branch on. Left as the simple
+    one-argument call and documented as an open, un-worked-around
+    limitation of the read path rather than shipping dead code that
+    only pretends to address it."""
     light_id = _find_item(name)
     if light_id is None:
         return {"error": "light not found: %s" % name}

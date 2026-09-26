@@ -87,13 +87,34 @@ and what's explicitly out of scope.
   Field enabled first (`DepthOfField()`, a toggle - LightWave pops "This
   option only applies when Depth of Field is turned on" and silently
   no-ops otherwise); `shutter_open`/`shutter_efficiency`/
-  `rolling_shutter` need Motion Blur or Particle Blur enabled, and
-  enabling that via automation is **not yet solved** - `MotionBlur()`
-  doesn't appear to be a simple toggle the way `DepthOfField()` is
-  (Camera Properties shows it as a button opening a sub-panel, not a
-  checkbox). Shipped anyway since the underlying write commands are
-  legitimate for a human-prepared camera - see `PLAN.md` "Camera
-  property writes" for the full investigation.
+  `rolling_shutter` need Motion Blur or Particle Blur enabled
+  (`lw_run_command("MotionBlur", [1])`) - this was fixed after shipping:
+  the bundled `lwcommandport` had wrapped `MotionBlur` with no way to
+  pass an argument at all, the same class of bug as `Ring()`/
+  `SetRenderDisplay()`. Confirmed live: with the fix, `MotionBlur(1)`
+  correctly satisfies the precondition and all three shutter properties
+  read back their previously-set values. See `PLAN.md` "Camera property
+  writes" for the full investigation.
+- `lw_set_light(light, intensity=, color=, falloff_type=, cone_angle=)`
+  (ROADMAP2.md item 5) - the write-side counterpart to
+  `lw_get_light_info`. Same shape and numeric-ID `SelectItem` pattern as
+  `lw_set_camera`. Confirmed live: `intensity`/`color` take effect
+  immediately. `falloff_type` write confirmed live via UI screenshot,
+  but only applies to Point/Spot lights (LightWave pops "This option
+  does not apply to the current light type" for Distant); its own
+  read-back through `lw_get_light_info` is a known-stale bug, unrelated
+  to the write (see below). Fixed a real duplicate-definition bug found
+  in the stub: `LightFalloffType` was defined twice, and Python silently
+  kept only the argument-less second copy, making the real one
+  unreachable. Deliberately does **not** wrap `LightVisibleToCamera`/
+  `LightCastsShadows` - both were suspected of having the same
+  missing-argument bug as `MotionBlur`, but live verification (clicking
+  their real checkboxes and checking Cmd History) proved they're genuine
+  argument-less toggles with no way to set or read a known state; use
+  `lw_run_command` directly for those two. Also confirmed live:
+  "Visible to Camera" is disabled in the UI for Point lights, only
+  usable on Spot/Distant. See `PLAN.md` "Light property writes" for the
+  full investigation.
 - `lw_render_frame(frame=None)`, `lw_render_scene()`, `lw_abort_render()`
   - one-way, fire-and-forget like every command here.
 - `lw_get_render_status()` - the actual point of this group: real

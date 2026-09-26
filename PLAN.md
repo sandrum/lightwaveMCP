@@ -1284,3 +1284,131 @@ this session didn't clearly need.
 `f_stop`, `aperture_height`); enabling Motion Blur/Particle Blur via
 automation remains open, a candidate for its own future investigation
 if shutter-timing control specifically becomes needed.
+
+**Resolved in the item 5 session.** The "Motion Blur is a button, not a
+toggle" read above was a reasonable guess from the UI alone but turned
+out to be wrong about the root cause. Working on item 5's light
+toggles surfaced the same shape of bug three more times in the
+`lwcommandport` stub (see "Light property writes" below), which
+prompted a closer look at `MotionBlur`'s actual wrapped definition
+rather than trusting the UI's button-vs-checkbox appearance: it was
+`def MotionBlur(self): self._send_command("MotionBlur")` - wrapped with
+**no way to pass an argument at all**, identical to the earlier
+`Ring()`/`SetRenderDisplay()` bugs from ROADMAP.md. A stray "MotionBlur
+1" spotted in Cmd History (logged from an unrelated manual UI click)
+confirmed the real native command takes an enable/disable argument.
+Fixed by adding `*args` to the stub, same pattern as the other two
+fixes. Confirmed live: `lw_run_command("MotionBlur", [1])` now
+correctly satisfies the precondition, and all three shutter properties
+immediately read back the values that had been silently accepted (but
+blocked from view) all along. The "button opens a sub-panel" UI
+behavior is real and still true - clicking "Motion Blur" in the UI does
+open a sub-panel - but that's a separate, cosmetic fact from whether
+the *native command* takes an argument; it does. Lesson carried
+forward into item 5: don't infer a command's real signature from how
+its UI control looks (button vs. checkbox), only from the stub's actual
+wrapped signature and Cmd History ground truth.
+
+## Light property writes (ROADMAP2.md item 5)
+
+Goal: wrap `LightIntensity`/`LightColor`/`LightFalloffType`/
+`LightConeAngle`/`LightVisibleToCamera`/`LightCastsShadows`, closing
+`lw_get_light_info`'s read-only status the same way item 4 closed it
+for cameras. Shipped `lw_set_light`, bundling the first four into one
+call, same shape and numeric-ID `SelectItem` pattern as `lw_set_camera`.
+
+**`intensity` and `color` confirmed live immediately** - no
+preconditions, no surprises, matching `zoom_factor`/`aperture_height`
+from item 4.
+
+**`LightFalloffType` duplicate-definition bug, found by reading code,
+not live testing.** While wiring up `falloff_type`, a grep through
+`lwcommandport/layout/__init__.py` turned up `LightFalloffType`
+defined twice:
+
+```python
+def LightFalloffType(self, *args):
+    """ LightFalloffType(type) """
+    if len(args) != 1:
+        raise Exception(...)
+    self._send_command("LightFalloffType", args)
+def LightFalloffType(self):
+    """ LightFalloffType() """
+    self._send_command("LightFalloffType")
+```
+
+Classic "last definition wins" Python bug - the correct, argument-taking
+version was completely shadowed and unreachable; any call to
+`lw.LightFalloffType(2)` would have raised a `TypeError` before ever
+reaching a real command. Fixed by deleting the second (bare) version.
+Found by code inspection this time, not a live symptom - worth noting
+since it means the project's "always verify live" norm doesn't replace
+reading the code carefully too; this bug would have looked like a
+runtime failure the moment anyone tried to actually use the write side.
+
+**`falloff_type` write confirmed live via UI screenshot** - Light
+Properties showed "Intensity Falloff: Inv Distance^2" immediately after
+sending `falloff_type=2` to a Point light. Initially looked broken
+because `lw_get_light_info`'s own read-back didn't change - traced this
+to a separate, still-open bug in the read path (see below), not the
+write, only by checking the actual UI panel instead of trusting the
+read tool's output blindly. Also hit a real LightWave constraint while
+testing: falloff doesn't apply to Distant lights at all - confirmed via
+LightWave's own error dialog, "This option does not apply to the
+current light type," when tried on a Distant light. Created a real
+Point light (`AddPointLight`) to test falloff properly instead of
+fighting the constraint.
+
+**`falloff` read-back bug, still open.** `LWLightInfo.falloff(light_id)`
+always returns the scene-default value regardless of what was just
+written - confirmed by writing `falloff_type=2`, checking the UI (write
+worked), then calling `lw_get_light_info` and seeing the old default.
+Tried the same `(id, time)` two-argument shape every other animatable
+field in `_get_light_info` uses, in case falloff is channel-driven like
+they are - confirmed live after a Layout plugin reload that this does
+**not** fix it either: the two-argument call doesn't raise, it just
+returns the identical stale value, so there's nothing to branch on.
+Reverted to the plain one-argument call and documented this as an open,
+un-worked-around limitation in `lw_mcp_ring.py`'s `_get_light_info`
+rather than shipping speculative two-argument code that provided no
+actual benefit - matches this project's standing preference for an
+honest documented gap over a guessed fix that doesn't demonstrably help.
+
+**`LightVisibleToCamera`/`LightCastsShadows` - suspected bug, live
+verification proved it wrong.** Given the `MotionBlur`/
+`SetRenderDisplay`/`LightFalloffType` pattern (three real bugs already
+found this phase, all "wrapped with no way to pass an argument"),
+calling `lw_run_command("LightVisibleToCamera", [0])` and seeing
+`"Layout.LightVisibleToCamera() takes 1 positional argument but 2 were
+given"` looked like the same bug a fourth time. It isn't: that error
+only proves our stub's *current* zero-arg signature rejects extra
+arguments, which is true of literally any zero-arg method - it says
+nothing about whether the *native* command underneath actually accepts
+one. The three earlier bugs were only confirmed as bugs because Cmd
+History showed a real manual UI action logging an argument (e.g.
+"MotionBlur 1"); no such evidence existed yet for this pair.
+
+Checked properly: had the "Visible to Camera" checkbox located (Light
+Properties > Basic tab - initially not visible at all because it's
+grayed out/disabled for Point lights, a real constraint discovered by
+switching Light Type and finding it becomes clickable under Spot or
+Distant only) and clicked live. Cmd History showed a bare
+`LightVisibleToCamera` with no argument following. Same test for "Cast
+Shadows" (Light Properties > Shadows tab) showed a bare
+`LightCastsShadows`, also no argument. Both are genuine argument-less
+toggles - the original docstring's claim before this investigation
+turned out to be correct, and the stub needed no fix. This is exactly
+the scenario the project's live-verification norm exists to prevent
+getting wrong: pattern-matching from a wrapper-level error to "probably
+the same bug" would have produced a confidently wrong fix (adding
+`*args` to a command that never wanted one) had it not been checked
+against real Cmd History ground truth first.
+
+Since neither toggle can be set to a known state or read back,
+`lw_set_light` deliberately does not wrap them - `lw_run_command` is
+the right tool for these two, same as `DepthOfField()` for item 4's
+`f_stop`.
+
+`ROADMAP2.md` item 5 is closed. Combined with item 4, this closes the
+biggest remaining "reads but can't write" gap in the connector for
+Camera and Light items.

@@ -396,7 +396,14 @@ def lw_get_camera_info(name: str = "Camera") -> str:
 def lw_get_light_info(name: str = "Light") -> str:
     """Get a light's type, falloff, color (RGB), intensity, and range.
     Same live-playhead evaluation as lw_get_camera_info for the
-    animatable values."""
+    animatable values. Known limitation: falloff is a stale read - it
+    reports the scene-default value and does not reflect writes made
+    via lw_set_light's falloff_type, confirmed live (UI screenshot
+    showed the write took effect while this field kept reporting the
+    old value). See lw_mcp_ring.py's _get_light_info for the
+    investigation. color_rgb is intensity-multiplied, not the raw
+    light color - LWLightInfo.color() behaves that way; there's a
+    separate rawColor() accessor this doesn't use."""
     return json.dumps(_query("get_light_info", name))
 
 
@@ -498,17 +505,21 @@ def lw_set_camera(camera: str, zoom_factor: float = None, f_stop: float = None,
     applies when Depth of Field is turned on" and silently no-ops
     otherwise. shutter_open/shutter_efficiency/rolling_shutter have the
     same kind of precondition (LightWave pops "This option only applies
-    when Particle Blur or Motion Blur is turned on"), confirmed live
-    three times over, but enabling Motion Blur via automation is NOT
-    yet solved: the native MotionBlur() command (unlike DepthOfField())
-    does not appear to be a simple toggle - Camera Properties shows
-    "Motion Blur" as a button opening a sub-panel, not a checkbox, and
-    calling MotionBlur() did not make the precondition pass. These
-    three properties are shipped as-is since the underlying write
-    commands are legitimate and will work once a human has enabled
-    Motion Blur or Particle Blur through the UI - just don't assume
-    they'll take effect standalone. See PLAN.md 'Camera property
-    writes' for the full investigation."""
+    when Particle Blur or Motion Blur is turned on") - RESOLVED (see
+    PLAN.md "Camera property writes" for the full story): the wrapped
+    MotionBlur() was missing its argument entirely (fixed in
+    lwcommandport/layout/__init__.py, same class of bug as the earlier
+    Ring()/SetRenderDisplay() fixes) - it's a real enable/disable
+    command (MotionBlur(1)/MotionBlur(0)), not the argument-less toggle
+    it looked like from its own docstring. Confirmed live: after
+    sending MotionBlur(1), all three shutter properties correctly read
+    back the values previously set (they'd been silently accepted but
+    not yet visible, the same way f_stop is before DepthOfField() is
+    on - the underlying value sticks even while the precondition
+    blocks it from taking visible effect). Call
+    lw_run_command("MotionBlur", [1]) once per session before relying
+    on these three properties, the same way lw_run_command
+    ("DepthOfField", []) is needed once before f_stop."""
     camera_id, id_resp = _resolve_item_id(camera)
     if not camera_id:
         return json.dumps({"error": "could not resolve camera: %s" % camera, "detail": id_resp})
@@ -535,6 +546,71 @@ def lw_set_camera(camera: str, zoom_factor: float = None, f_stop: float = None,
             lw.RollingShutter(rolling_shutter)
             sent.append("RollingShutter")
         return json.dumps({"result": "set %s on %s (id %s)" % (sent, camera, camera_id)})
+    except Exception as exc:  # noqa: BLE001
+        return json.dumps({"error": str(exc)})
+
+
+@mcp.tool()
+def lw_set_light(light: str, intensity: float = None, color: list = None,
+                  falloff_type: int = None, cone_angle: float = None) -> str:
+    """Set light properties - ROADMAP2.md item 5, the write-side
+    counterpart to lw_get_light_info. Wraps LightIntensity/LightColor
+    (color is [r, g, b], each 0.0-1.0)/LightFalloffType/LightConeAngle,
+    following lw_set_camera's bundled-optional-params shape. Same
+    numeric-ID SelectItem fix as lw_set_camera/lw_set_target. Confirmed
+    live: intensity and color take effect immediately.
+
+    falloff_type write confirmed live via UI screenshot (Light
+    Properties showed the new "Intensity Falloff" setting immediately)
+    - but lw_get_light_info's own falloff field is a known-stale read
+    that never reflects it, an unfixed limitation documented in
+    lw_mcp_ring.py's _get_light_info. falloff_type is also a real
+    LightWave constraint, not a bug: it only applies to Point/Spot
+    lights, confirmed via LightWave's own error dialog ("This option
+    does not apply to the current light type") when tried on a Distant
+    light. cone_angle only matters for spot/cone-type lights - not
+    independently visually confirmed the way falloff_type was.
+
+    Deliberately does NOT cover LightVisibleToCamera/LightCastsShadows.
+    Both are confirmed-live, genuine argument-less TOGGLES (Cmd History
+    shows a bare "LightVisibleToCamera"/"LightCastsShadows" with no
+    following number after clicking their checkboxes - unlike
+    MotionBlur, which looked the same way but turned out to take a real
+    argument; this pair does not), so there's no way to set them to a
+    known state or read one back. Use lw_run_command
+    ("LightVisibleToCamera", []) / lw_run_command("LightCastsShadows",
+    []) directly if needed, the same way lw_run_command("DepthOfField",
+    []) is used to satisfy lw_set_camera's f_stop precondition. Also
+    confirmed live: "Visible to Camera" is itself grayed out/disabled
+    in the UI for Point lights - only Spot and Distant lights can use
+    it at all, the mirror image of falloff_type's Point/Spot-only
+    restriction.
+
+    Also fixed a real bug found while building this: lwcommandport's
+    LightFalloffType was defined TWICE (once correctly taking a `type`
+    argument, then again with no arguments right after it) - Python
+    silently keeps only the second definition, so the argument version
+    was completely unreachable before this fix."""
+    light_id, id_resp = _resolve_item_id(light)
+    if not light_id:
+        return json.dumps({"error": "could not resolve light: %s" % light, "detail": id_resp})
+    lw = _layout()
+    sent = []
+    try:
+        lw.SelectItem(light_id)
+        if intensity is not None:
+            lw.LightIntensity(intensity)
+            sent.append("LightIntensity")
+        if color is not None:
+            lw.LightColor(*color)
+            sent.append("LightColor")
+        if falloff_type is not None:
+            lw.LightFalloffType(falloff_type)
+            sent.append("LightFalloffType")
+        if cone_angle is not None:
+            lw.LightConeAngle(cone_angle)
+            sent.append("LightConeAngle")
+        return json.dumps({"result": "set %s on %s (id %s)" % (sent, light, light_id)})
     except Exception as exc:  # noqa: BLE001
         return json.dumps({"error": str(exc)})
 

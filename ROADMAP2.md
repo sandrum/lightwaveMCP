@@ -98,21 +98,71 @@ documented crash (`LWChannelInfo`/`nextGroup`).
    (`DepthOfField()`, confirmed to be a working toggle). The three
    shutter properties have the same kind of precondition (needs Motion
    Blur or Particle Blur enabled - confirmed via the same style of
-   error, popped three times for the three properties in one call) but
-   **enabling Motion Blur via automation is not yet solved**:
-   `MotionBlur()`, unlike `DepthOfField()`, does not appear to be a
-   simple toggle - Camera Properties shows it as a button that opens a
-   sub-panel, and calling it did not make the precondition pass.
-   Shipped anyway, since the write commands themselves are legitimate
-   and will work once a human has enabled Motion Blur/DOF through the
-   UI - documented as a real, known limitation rather than papered over.
-   See `PLAN.md` "Camera property writes" for the full investigation.
+   error, popped three times for the three properties in one call).
 
-5. **Light property writes** - `LightIntensity`, `LightColor`,
-   `LightFalloffType`, `LightConeAngle`, `LightVisibleToCamera`,
-   `LightCastsShadows` all exist. Same technique and effort tier as
-   item 4, sequenced after it. Together, items 4 and 5 close the
-   biggest remaining "reads but can't write" gap in the connector.
+   **The Motion Blur gap is now resolved** (was open at first ship):
+   `MotionBlur()` looked like an argument-less toggle - Camera
+   Properties shows it as a button opening a sub-panel, not a checkbox
+   - and calling it bare didn't make the precondition pass. The real
+   cause was a bug in the bundled `lwcommandport` stub: `MotionBlur`
+   was wrapped as `def MotionBlur(self): ...` with no way to pass an
+   argument at all, silently making a real settable command
+   (`MotionBlur(enable)`) look argument-less. Spotted via a stray
+   "MotionBlur 1" in Cmd History from a manual UI click, fixed the same
+   way as the earlier `Ring()`/`SetRenderDisplay()` fixes, confirmed
+   live: `lw_run_command("MotionBlur", [1])` now correctly satisfies
+   the precondition and all three shutter properties read back their
+   previously-set values. See `PLAN.md` "Camera property writes" for
+   the full investigation.
+
+5. **Light property writes - DONE.** Shipped `lw_set_light`, wrapping
+   `LightIntensity`/`LightColor`/`LightFalloffType`/`LightConeAngle`
+   into one call, same shape and numeric-ID `SelectItem` pattern as
+   `lw_set_camera`. Confirmed live: intensity and color take effect
+   immediately.
+
+   Found and fixed a real bug in the same family as `MotionBlur`:
+   `LightFalloffType` was defined TWICE in the `lwcommandport` stub -
+   once correctly taking a `type` argument, then immediately
+   overwritten by a bare no-argument version right after it. Python
+   silently keeps only the last definition, so the working version was
+   completely unreachable until this was found by reading the stub
+   file directly (not live testing) and fixed by deleting the
+   duplicate. The write itself was then confirmed live via a UI
+   screenshot ("Intensity Falloff: Inv Distance^2" appeared immediately
+   after setting `falloff_type=2`) - but `lw_get_light_info`'s own
+   `falloff` read remains a known-stale bug, unaffected by the write
+   fix and not resolved this round (tried reading with a time argument
+   the way every other animatable field here does; confirmed live that
+   this does not help either - see `lw_mcp_ring.py`'s `_get_light_info`
+   docstring). `falloff_type` also turned out to be a real LightWave
+   constraint, not a bug: it only applies to Point/Spot lights,
+   confirmed via LightWave's own error dialog when tried on a Distant
+   light ("This option does not apply to the current light type").
+
+   `LightVisibleToCamera`/`LightCastsShadows` were suspected of having
+   the same missing-argument bug as `MotionBlur`, since calling either
+   through `lw_run_command` with an argument raised the same shape of
+   Python `TypeError`. Live verification proved that wrong: clicking
+   their real checkboxes in the UI and checking Cmd History showed a
+   bare `LightVisibleToCamera`/`LightCastsShadows` with no argument
+   following - both are genuine argument-less toggles, and the
+   `TypeError` was simply Python correctly rejecting an argument that
+   was never valid to begin with. This is exactly the failure mode this
+   project's live-verification norm exists to catch: a wrapper-level
+   error alone doesn't tell you whether the *native* command takes an
+   argument, only that our stub's current signature rejected the call.
+   Also confirmed live: "Visible to Camera" itself is grayed out in the
+   UI for Point lights - only Spot and Distant lights can use it,
+   mirroring `falloff_type`'s Point/Spot-only restriction from the
+   other direction. Neither toggle is settable to a known state or
+   readable back, so `lw_set_light` deliberately does not wrap them;
+   use `lw_run_command("LightVisibleToCamera", [])` /
+   `lw_run_command("LightCastsShadows", [])` directly. See `PLAN.md`
+   "Light property writes" for the full investigation.
+
+   Together, items 4 and 5 close the biggest remaining "reads but
+   can't write" gap in the connector.
 
 6. **Multi-item / bulk selection investigation** - `AddToSelection`
    was tested during earlier work (see PLAN.md) and appeared to do

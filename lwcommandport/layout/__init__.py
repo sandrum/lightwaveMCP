@@ -2377,9 +2377,6 @@ class Layout(CommandPort):
         if len(args) != 1:
             raise Exception("Invalid argument count %d provided to command LightFalloffType(): expected (type)" % len(args))
         self._send_command("LightFalloffType", args)
-    def LightFalloffType(self):
-        """ LightFalloffType() """
-        self._send_command("LightFalloffType")
     def AffectDiffuse(self):
         """ AffectDiffuse() """
         self._send_command("AffectDiffuse")
@@ -2757,9 +2754,9 @@ class Layout(CommandPort):
     def ParticleBlur(self):
         """ ParticleBlur() """
         self._send_command("ParticleBlur")
-    def MotionBlur(self):
-        """ MotionBlur() """
-        self._send_command("MotionBlur")
+    def MotionBlur(self, *args):
+        """ MotionBlur(enable) """
+        self._send_command("MotionBlur", args)
     def BlurLength(self, *args):
         """ BlurLength(length) """
         if len(args) != 1:
